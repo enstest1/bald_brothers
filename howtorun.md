@@ -251,6 +251,26 @@ git push -u origin main
 2. Wait 5-10 minutes for deployment
 3. Your site will be live at something like `https://bald-brothers-story.onrender.com`
 
+### ⚠️ Node.js Version for Render Deployment
+
+Render may use a very new Node.js version by default, which can cause compatibility issues. To ensure compatibility, specify Node.js 18.x:
+
+**Option A: Add a .node-version file**
+1. In your project root, create a file named `.node-version` with this content:
+   ```
+   18.20.2
+   ```
+
+**Option B: Add to package.json**
+1. Add this to your `package.json`:
+   ```json
+   "engines": {
+     "node": "18.x"
+   }
+   ```
+
+After making these changes, commit and push to GitHub before deploying to Render.
+
 ---
 
 ## 🔄 Step 8: Set Up Automation (GitHub Actions)
