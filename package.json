@@ -1,0 +1,38 @@
+{
+  "name": "bald_brothers",
+  "version": "1.0.0",
+  "main": "dist/server.js",
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/server.js",
+    "dev": "tsc && node dist/server.js",
+    "dev:watch": "tsc --watch",
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "test:agents": "echo \"Testing chapter agent...\" && node -e \"require('./dist/src/agents/chapterAgent').ChapterAgent.run('test').then(r => console.log('Agent test result:', r.output?.length > 400 ? 'PASS' : 'FAIL'))\"",
+    "dev:all": "npm run build && npm start"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "description": "",
+  "dependencies": {
+    "@openrouter/ai-sdk-provider": "^0.7.1",
+    "@supabase/supabase-js": "^2.50.0",
+    "@types/cookie-parser": "^1.4.9",
+    "@types/express": "^4.17.23",
+    "@types/node": "^24.0.0",
+    "@types/react": "^19.1.7",
+    "@types/uuid": "^10.0.0",
+    "cookie-parser": "^1.4.7",
+    "dotenv": "^16.5.0",
+    "express": "^4.21.2",
+    "feather-ai": "github:kingbootoshi/feather",
+    "node-cron": "^4.1.0",
+    "node-fetch": "^3.3.2",
+    "openai": "^5.3.0",
+    "pino": "^9.7.0",
+    "react": "^19.1.0",
+    "typescript": "^5.8.3",
+    "uuid": "^11.1.0"
+  }
+}

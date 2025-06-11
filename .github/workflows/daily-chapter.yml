@@ -1,0 +1,48 @@
+name: Daily Chapter
+on:
+  schedule:
+    - cron: "0 9 * * *"  # 9:00 AM UTC daily
+  workflow_dispatch:  # Allow manual triggering
+
+jobs:
+  generate-chapter:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        
+      - name: Generate daily chapter
+        run: |
+          echo "Triggering daily chapter generation..."
+          response=$(curl -s -w "%{http_code}" -X POST "${{ secrets.API_URL }}/worlds/1/arcs/1/progress" \
+            -H "Content-Type: application/json" \
+            -H "Authorization: Bearer ${{ secrets.API_TOKEN }}" \
+            -d '{}')
+          
+          http_code="${response: -3}"
+          body="${response%???}"
+          
+          echo "HTTP Status: $http_code"
+          echo "Response: $body"
+          
+          if [ "$http_code" -ne 200 ]; then
+            echo "Failed to generate chapter. HTTP Status: $http_code"
+            echo "Response body: $body"
+            exit 1
+          fi
+          
+          echo "Chapter generated successfully!"
+        env:
+          API_URL: ${{ secrets.API_URL }}
+          API_TOKEN: ${{ secrets.API_TOKEN }}
+
+      - name: Notify on failure
+        if: failure()
+        run: |
+          echo "Daily chapter generation failed. Check the logs above for details."
+          # Optional: Add webhook notification here
+          # curl -X POST "${{ secrets.DISCORD_WEBHOOK }}" \
+          #   -H "Content-Type: application/json" \
+          #   -d '{"content": "⚠️ Daily chapter generation failed! Check GitHub Actions for details."}'

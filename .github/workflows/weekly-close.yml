@@ -1,0 +1,79 @@
+name: Close Weekly Poll
+on:
+  schedule:
+    - cron: "59 23 * * 6"  # Saturday 23:59 UTC
+  workflow_dispatch:  # Allow manual triggering
+
+jobs:
+  close-poll:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        
+      - name: Close current poll and tally votes
+        run: |
+          echo "Closing current poll and tallying votes..."
+          response=$(curl -s -w "%{http_code}" -X POST "${{ secrets.API_URL }}/polls/close-current" \
+            -H "Content-Type: application/json" \
+            -H "Authorization: Bearer ${{ secrets.API_TOKEN }}" \
+            -d '{}')
+          
+          http_code="${response: -3}"
+          body="${response%???}"
+          
+          echo "HTTP Status: $http_code"
+          echo "Response: $body"
+          
+          if [ "$http_code" -ne 200 ]; then
+            echo "Failed to close poll. HTTP Status: $http_code"
+            echo "Response body: $body"
+            exit 1
+          fi
+          
+          echo "Poll closed successfully!"
+          echo "Results: $body"
+        env:
+          API_URL: ${{ secrets.API_URL }}
+          API_TOKEN: ${{ secrets.API_TOKEN }}
+
+      - name: Create next week's poll (optional)
+        run: |
+          echo "Creating next week's poll..."
+          next_week=$(date -d "+7 days" -u +"%Y-%m-%dT23:59:59Z")
+          
+          response=$(curl -s -w "%{http_code}" -X POST "${{ secrets.API_URL }}/polls/create" \
+            -H "Content-Type: application/json" \
+            -H "Authorization: Bearer ${{ secrets.API_TOKEN }}" \
+            -d "{
+              \"question\": \"Should the Bald Brothers take a bold new direction in the next arc?\",
+              \"closes_at\": \"$next_week\"
+            }")
+          
+          http_code="${response: -3}"
+          body="${response%???}"
+          
+          echo "HTTP Status: $http_code"
+          echo "Response: $body"
+          
+          if [ "$http_code" -ne 200 ]; then
+            echo "Warning: Failed to create next poll. HTTP Status: $http_code"
+            echo "Response body: $body"
+            # Don't fail the workflow for this
+          else
+            echo "Next week's poll created successfully!"
+          fi
+        env:
+          API_URL: ${{ secrets.API_URL }}
+          API_TOKEN: ${{ secrets.API_TOKEN }}
+
+      - name: Notify on failure
+        if: failure()
+        run: |
+          echo "Weekly poll closure failed. Check the logs above for details."
+          # Optional: Add webhook notification here
+          # curl -X POST "${{ secrets.DISCORD_WEBHOOK }}" \
+          #   -H "Content-Type: application/json" \
+          #   -d '{"content": "⚠️ Weekly poll closure failed! Check GitHub Actions for details."}'

@@ -1,0 +1,1277 @@
+This file is a merged representation of the entire codebase, combined into a single document by Repomix.
+
+<file_summary>
+This section contains a summary of this file.
+
+<purpose>
+This file contains a packed representation of the entire repository's contents.
+It is designed to be easily consumable by AI systems for analysis, code review,
+or other automated processes.
+</purpose>
+
+<file_format>
+The content is organized as follows:
+1. This summary section
+2. Repository information
+3. Directory structure
+4. Repository files (if enabled)
+5. Multiple file entries, each consisting of:
+  - File path as an attribute
+  - Full contents of the file
+</file_format>
+
+<usage_guidelines>
+- This file should be treated as read-only. Any changes should be made to the
+  original repository files, not this packed version.
+- When processing this file, use the file path to distinguish
+  between different files in the repository.
+- Be aware that this file may contain sensitive information. Handle it with
+  the same level of security as you would the original repository.
+</usage_guidelines>
+
+<notes>
+- Some files may have been excluded based on .gitignore rules and Repomix's configuration
+- Binary files are not included in this packed representation. Please refer to the Repository Structure section for a complete list of file paths, including binary files
+- Files matching patterns in .gitignore are excluded
+- Files matching default ignore patterns are excluded
+- Files are sorted by Git change count (files with more changes are at the bottom)
+</notes>
+
+</file_summary>
+
+<directory_structure>
+.env.example
+.github/workflows/daily-chapter.yml
+.github/workflows/weekly-close.yml
+package.json
+README.md
+server.ts
+server/routes/chapters.ts
+server/routes/polls.ts
+server/sched/closePoll.ts
+src/agents/chapterAgent.ts
+src/components/Poll.tsx
+src/lib/cloudClient.ts
+tsconfig.json
+</directory_structure>
+
+<files>
+This section contains the contents of the repository's files.
+
+<file path=".env.example">
+# Bootoshi Cloud Configuration
+CLOUD_URL=https://api.baldbros.xyz
+CLOUD_PASSWORD=your_cloud_password_here
+
+# Supabase Configuration
+SUPABASE_URL=https://your-project.supabase.co
+SUPABASE_ANON_KEY=your_supabase_anon_key_here
+
+# OpenRouter Configuration (for Feather AI)
+OPENROUTER_API_KEY=your_openrouter_api_key_here
+
+# Optional: OpenPipe for data collection (recommended by Feather)
+OPENPIPE_API_KEY=your_openpipe_api_key_here
+
+# Server Configuration
+PORT=3000
+NODE_ENV=development
+
+# API Security (for GitHub Actions)
+API_TOKEN=your_secure_api_token_here
+</file>
+
+<file path=".github/workflows/daily-chapter.yml">
+name: Daily Chapter
+on:
+  schedule:
+    - cron: "0 9 * * *"  # 9:00 AM UTC daily
+  workflow_dispatch:  # Allow manual triggering
+
+jobs:
+  generate-chapter:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        
+      - name: Generate daily chapter
+        run: |
+          echo "Triggering daily chapter generation..."
+          response=$(curl -s -w "%{http_code}" -X POST "${{ secrets.API_URL }}/worlds/1/arcs/1/progress" \
+            -H "Content-Type: application/json" \
+            -H "Authorization: Bearer ${{ secrets.API_TOKEN }}" \
+            -d '{}')
+          
+          http_code="${response: -3}"
+          body="${response%???}"
+          
+          echo "HTTP Status: $http_code"
+          echo "Response: $body"
+          
+          if [ "$http_code" -ne 200 ]; then
+            echo "Failed to generate chapter. HTTP Status: $http_code"
+            echo "Response body: $body"
+            exit 1
+          fi
+          
+          echo "Chapter generated successfully!"
+        env:
+          API_URL: ${{ secrets.API_URL }}
+          API_TOKEN: ${{ secrets.API_TOKEN }}
+
+      - name: Notify on failure
+        if: failure()
+        run: |
+          echo "Daily chapter generation failed. Check the logs above for details."
+          # Optional: Add webhook notification here
+          # curl -X POST "${{ secrets.DISCORD_WEBHOOK }}" \
+          #   -H "Content-Type: application/json" \
+          #   -d '{"content": "⚠️ Daily chapter generation failed! Check GitHub Actions for details."}'
+</file>
+
+<file path=".github/workflows/weekly-close.yml">
+name: Close Weekly Poll
+on:
+  schedule:
+    - cron: "59 23 * * 6"  # Saturday 23:59 UTC
+  workflow_dispatch:  # Allow manual triggering
+
+jobs:
+  close-poll:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        
+      - name: Close current poll and tally votes
+        run: |
+          echo "Closing current poll and tallying votes..."
+          response=$(curl -s -w "%{http_code}" -X POST "${{ secrets.API_URL }}/polls/close-current" \
+            -H "Content-Type: application/json" \
+            -H "Authorization: Bearer ${{ secrets.API_TOKEN }}" \
+            -d '{}')
+          
+          http_code="${response: -3}"
+          body="${response%???}"
+          
+          echo "HTTP Status: $http_code"
+          echo "Response: $body"
+          
+          if [ "$http_code" -ne 200 ]; then
+            echo "Failed to close poll. HTTP Status: $http_code"
+            echo "Response body: $body"
+            exit 1
+          fi
+          
+          echo "Poll closed successfully!"
+          echo "Results: $body"
+        env:
+          API_URL: ${{ secrets.API_URL }}
+          API_TOKEN: ${{ secrets.API_TOKEN }}
+
+      - name: Create next week's poll (optional)
+        run: |
+          echo "Creating next week's poll..."
+          next_week=$(date -d "+7 days" -u +"%Y-%m-%dT23:59:59Z")
+          
+          response=$(curl -s -w "%{http_code}" -X POST "${{ secrets.API_URL }}/polls/create" \
+            -H "Content-Type: application/json" \
+            -H "Authorization: Bearer ${{ secrets.API_TOKEN }}" \
+            -d "{
+              \"question\": \"Should the Bald Brothers take a bold new direction in the next arc?\",
+              \"closes_at\": \"$next_week\"
+            }")
+          
+          http_code="${response: -3}"
+          body="${response%???}"
+          
+          echo "HTTP Status: $http_code"
+          echo "Response: $body"
+          
+          if [ "$http_code" -ne 200 ]; then
+            echo "Warning: Failed to create next poll. HTTP Status: $http_code"
+            echo "Response body: $body"
+            # Don't fail the workflow for this
+          else
+            echo "Next week's poll created successfully!"
+          fi
+        env:
+          API_URL: ${{ secrets.API_URL }}
+          API_TOKEN: ${{ secrets.API_TOKEN }}
+
+      - name: Notify on failure
+        if: failure()
+        run: |
+          echo "Weekly poll closure failed. Check the logs above for details."
+          # Optional: Add webhook notification here
+          # curl -X POST "${{ secrets.DISCORD_WEBHOOK }}" \
+          #   -H "Content-Type: application/json" \
+          #   -d '{"content": "⚠️ Weekly poll closure failed! Check GitHub Actions for details."}'
+</file>
+
+<file path="package.json">
+{
+  "name": "bald_brothers",
+  "version": "1.0.0",
+  "main": "dist/server.js",
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/server.js",
+    "dev": "tsc && node dist/server.js",
+    "dev:watch": "tsc --watch",
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "test:agents": "echo \"Testing chapter agent...\" && node -e \"require('./dist/src/agents/chapterAgent').ChapterAgent.run('test').then(r => console.log('Agent test result:', r.output?.length > 400 ? 'PASS' : 'FAIL'))\"",
+    "dev:all": "npm run build && npm start"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "description": "",
+  "dependencies": {
+    "@openrouter/ai-sdk-provider": "^0.7.1",
+    "@supabase/supabase-js": "^2.50.0",
+    "@types/cookie-parser": "^1.4.9",
+    "@types/express": "^4.17.23",
+    "@types/node": "^24.0.0",
+    "@types/react": "^19.1.7",
+    "@types/uuid": "^10.0.0",
+    "cookie-parser": "^1.4.7",
+    "dotenv": "^16.5.0",
+    "express": "^4.21.2",
+    "feather-ai": "github:kingbootoshi/feather",
+    "node-cron": "^4.1.0",
+    "node-fetch": "^3.3.2",
+    "openai": "^5.3.0",
+    "pino": "^9.7.0",
+    "react": "^19.1.0",
+    "typescript": "^5.8.3",
+    "uuid": "^11.1.0"
+  }
+}
+</file>
+
+<file path="README.md">
+# Bald Brothers Story Engine
+
+A sophisticated story generation system that automatically creates daily chapters using AI agents, manages long-term narrative memory, and runs community polls to guide story direction.
+
+## Features
+
+- 🤖 **Automated Daily Chapters**: Generate compelling story content every day using Feather AI + OpenRouter
+- 📚 **Long-term Memory**: Persist and retrieve narrative context through Bootoshi Cloud (mem0)
+- 🗳️ **Community Polls**: Weekly binary polls that influence story direction
+- ⏰ **Scheduled Automation**: GitHub Actions handle daily generation and weekly poll closure
+- 🚀 **Deployable Anywhere**: Works on Render, Fly, VPS, or any hosting platform
+
+## Architecture
+
+```
+┌─── GitHub Actions ───┐    ┌─── Express Server ───┐    ┌─── External APIs ───┐
+│  Daily Chapter       │───▶│  /api/progress        │───▶│  Bootoshi Cloud     │
+│  Weekly Poll Close   │    │  /polls/*             │    │  OpenRouter/OpenAI  │
+└──────────────────────┘    │  Poll Management      │    │  Supabase           │
+                            └───────────────────────┘    └─────────────────────┘
+```
+
+## Quick Start
+
+### 1. Environment Setup
+
+```bash
+# Copy environment template
+cp .env.example .env
+
+# Edit .env with your credentials
+nano .env
+```
+
+Required environment variables:
+- `CLOUD_URL`: Bootoshi Cloud endpoint (https://api.baldbros.xyz)
+- `CLOUD_PASSWORD`: Your Bootoshi Cloud password
+- `SUPABASE_URL`: Your Supabase project URL
+- `SUPABASE_ANON_KEY`: Supabase anonymous public key
+- `OPENROUTER_API_KEY`: OpenRouter API key for AI model access
+
+### 2. Database Setup (Supabase)
+
+Create these tables in your Supabase database:
+
+```sql
+-- Polls table
+CREATE TABLE polls (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  question text NOT NULL,
+  options text[] NOT NULL DEFAULT ARRAY['yes','no'],
+  closes_at timestamptz NOT NULL
+);
+
+-- Votes table  
+CREATE TABLE votes (
+  poll_id uuid REFERENCES polls(id),
+  client_id uuid NOT NULL,
+  choice int NOT NULL CHECK (choice IN (0, 1)),
+  PRIMARY KEY (poll_id, client_id)
+);
+
+-- Story beats table
+CREATE TABLE beats (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  arc_id text NOT NULL,
+  body text NOT NULL,
+  authored_at timestamptz DEFAULT now()
+);
+```
+
+### 3. Installation & Development
+
+```bash
+# Install dependencies
+npm install
+
+# Build the project
+npm run build
+
+# Start development server
+npm run dev
+
+# Or run with file watching
+npm run dev:watch
+```
+
+### 4. Testing
+
+```bash
+# Test chapter agent
+npm run test:agents
+
+# Test full integration
+npm run dev:all
+```
+
+## API Endpoints
+
+### Story Generation
+- `POST /api/worlds/:id/arcs/:arcId/progress` - Generate new chapter
+
+### Poll Management
+- `GET /polls/open` - Get current open poll
+- `POST /polls/:id/vote` - Submit vote (choice: 0=yes, 1=no)
+- `POST /polls/create` - Create new poll
+- `POST /polls/close-current` - Close current poll and tally results
+
+### System
+- `GET /health` - Health check
+- `GET /` - API documentation
+
+## Deployment
+
+### GitHub Actions Setup
+
+1. Add repository secrets:
+   - `API_URL`: Your deployed server URL
+   - `API_TOKEN`: Secure token for API authentication
+
+2. The workflows will automatically:
+   - Generate chapters daily at 9:00 AM UTC
+   - Close polls weekly on Saturday at 23:59 UTC
+
+### Render Deployment
+
+```bash
+# Build command
+npm run build
+
+# Start command  
+npm start
+
+# Environment variables
+# Add all variables from .env.example
+```
+
+### Docker Deployment
+
+```dockerfile
+FROM node:18-alpine
+WORKDIR /app
+COPY package*.json ./
+RUN npm ci --only=production
+COPY . .
+RUN npm run build
+EXPOSE 3000
+CMD ["npm", "start"]
+```
+
+## File Structure
+
+```
+story-engine/
+├── src/
+│   ├── agents/
+│   │   └── chapterAgent.ts        # AI agent for story generation
+│   ├── lib/
+│   │   └── cloudClient.ts         # Bootoshi Cloud integration
+│   └── components/
+│       └── Poll.tsx               # React poll UI component
+├── server/
+│   ├── routes/
+│   │   ├── chapters.ts            # Chapter generation endpoints
+│   │   └── polls.ts               # Poll management endpoints
+│   └── sched/
+│       └── closePoll.ts           # Scheduled poll closure
+├── .github/
+│   └── workflows/
+│       ├── daily-chapter.yml      # Daily chapter GitHub Action
+│       └── weekly-close.yml       # Weekly poll closure Action
+├── server.ts                      # Main server entry point
+└── tsconfig.json                  # TypeScript configuration
+```
+
+## Development Workflow
+
+1. **Chapter Generation**: The `ChapterAgent` uses tools to fetch recent story context and save new chapters
+2. **Memory Persistence**: All story content is stored in both Supabase and Bootoshi Cloud for different access patterns
+3. **Poll Lifecycle**: Community polls run weekly, with results fed back into story context
+4. **Automated Scheduling**: GitHub Actions ensure consistent daily content generation
+
+## Logging
+
+The system uses `pino` for structured JSON logging:
+
+```typescript
+log.info("[agent] fetched %d memories", list.length);
+log.warn("Poll duplicate client_id %s", client_id);  
+log.error(err, "Bootoshi Cloud failure");
+log.info("Chapter length=%d saved", output.length);
+```
+
+## Security
+
+- API endpoints are protected with token authentication
+- Poll voting uses secure UUID-based client identification
+- Environment variables keep all credentials secure
+- CORS and other security headers should be added for production
+
+## Contributing
+
+1. Fork the repository
+2. Create a feature branch
+3. Test your changes with `npm run test:agents`
+4. Submit a pull request
+
+## License
+
+MIT - Built for the Bald Brothers community
+</file>
+
+<file path="server.ts">
+import express from "express";
+import cookieParser from "cookie-parser";
+import "dotenv/config";
+import chaptersRouter from "./server/routes/chapters";
+import pollsRouter from "./server/routes/polls";
+import { startPollScheduler } from "./server/sched/closePoll";
+const log = require("pino")();
+
+const app = express();
+const PORT = process.env.PORT || 3000;
+
+// Middleware
+app.use(express.json());
+app.use(cookieParser());
+app.use(express.static("public")); // Serve static files
+
+// Security middleware for API endpoints
+const authenticateAPI = (req: express.Request, res: express.Response, next: express.NextFunction) => {
+  // Skip authentication for GET requests to polls (public viewing)
+  if (req.method === "GET" && req.path.startsWith("/polls")) {
+    return next();
+  }
+
+  const token = req.headers.authorization?.replace("Bearer ", "") || req.headers["x-api-token"];
+  const expectedToken = process.env.API_TOKEN;
+
+  if (!expectedToken) {
+    log.warn("API_TOKEN not configured - API endpoints are unprotected");
+    return next();
+  }
+
+  if (!token || token !== expectedToken) {
+    log.warn("Unauthorized API access attempt from %s", req.ip);
+    return res.status(401).json({ error: "Unauthorized" });
+  }
+
+  next();
+};
+
+// Routes
+app.use("/api", authenticateAPI as express.RequestHandler);
+app.use("/api", chaptersRouter);
+app.use("/polls", pollsRouter);
+
+// Health check endpoint
+app.get("/health", (req, res) => {
+  res.json({ 
+    status: "ok", 
+    timestamp: new Date().toISOString(),
+    version: "1.0.0"
+  });
+});
+
+// Root endpoint
+app.get("/", (req, res) => {
+  res.json({
+    message: "Bald Brothers Story Engine API",
+    version: "1.0.0",
+    endpoints: {
+      health: "GET /health",
+      chapters: "POST /api/worlds/:id/arcs/:arcId/progress",
+      polls: {
+        open: "GET /polls/open",
+        vote: "POST /polls/:id/vote",
+        create: "POST /polls/create", 
+        close: "POST /polls/close-current"
+      }
+    }
+  });
+});
+
+// Error handling middleware
+app.use((err: Error, req: express.Request, res: express.Response, next: express.NextFunction) => {
+  log.error(err, "Unhandled error in request");
+  res.status(500).json({ error: "Internal server error" });
+});
+
+// Start server
+app.listen(PORT, () => {
+  log.info("Bald Brothers Story Engine server started on port %d", PORT);
+  log.info("Environment: %s", process.env.NODE_ENV || "development");
+  
+  // Start the poll scheduler
+  startPollScheduler();
+  
+  // Log configuration status
+  const requiredEnvVars = ["CLOUD_URL", "CLOUD_PASSWORD", "SUPABASE_URL", "SUPABASE_ANON_KEY", "OPENROUTER_API_KEY"];
+  const missingVars = requiredEnvVars.filter(varName => !process.env[varName]);
+  
+  if (missingVars.length > 0) {
+    log.warn("Missing required environment variables: %s", missingVars.join(", "));
+    log.info("Please check your .env file against .env.example");
+  } else {
+    log.info("All required environment variables are configured");
+  }
+});
+
+export default app;
+</file>
+
+<file path="server/routes/chapters.ts">
+import express from "express";
+import { createClient } from "@supabase/supabase-js";
+import { ChapterAgent } from "../../src/agents/chapterAgent";
+const log = require("pino")();
+
+const router = express.Router();
+
+// Initialize Supabase client
+const supabase = createClient(
+  process.env.SUPABASE_URL!,
+  process.env.SUPABASE_ANON_KEY!
+);
+
+router.post("/worlds/:id/arcs/:arcId/progress", async (req, res) => {
+  try {
+    log.info("Starting chapter generation for arc %s", req.params.arcId);
+    
+    // Run the chapter agent to generate new content
+    const result = await ChapterAgent.run("Generate the next chapter in the Bald Brothers saga");
+    
+    if (!result.success) {
+      log.error("Chapter generation failed: %o", result);
+      return res.status(500).json({ error: "Chapter generation failed" });
+    }
+
+    const output = result.output as string;
+    log.info("Chapter generated %d chars", output.length);
+    
+    // Save the chapter to Supabase
+    const { data, error } = await supabase.from("beats").insert({
+      arc_id: req.params.arcId,
+      body: output,
+      authored_at: new Date()
+    });
+
+    if (error) {
+      log.error(error, "Failed to save chapter to Supabase");
+      return res.status(500).json({ error: "Failed to save chapter" });
+    }
+
+    log.info("Chapter successfully saved to database");
+    res.json({ ok: true, body: output });
+  } catch (error) {
+    log.error(error, "Error in chapter generation endpoint");
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+export default router;
+</file>
+
+<file path="server/routes/polls.ts">
+import express from "express";
+import { createClient } from "@supabase/supabase-js";
+import { v4 as uuidv4 } from "uuid";
+const log = require("pino")();
+
+const router = express.Router();
+
+// Initialize Supabase client
+const supabase = createClient(
+  process.env.SUPABASE_URL!,
+  process.env.SUPABASE_ANON_KEY!
+);
+
+// Get the currently open poll
+router.get("/open", async (req, res) => {
+  try {
+    const { data: polls, error } = await supabase
+      .from("polls")
+      .select("*")
+      .gt("closes_at", new Date().toISOString())
+      .order("closes_at", { ascending: true })
+      .limit(1);
+
+    if (error) {
+      log.error(error, "Failed to fetch open polls");
+      return res.status(500).json({ error: "Failed to fetch polls" });
+    }
+
+    if (!polls || polls.length === 0) {
+      return res.json({ poll: null });
+    }
+
+    const poll = polls[0];
+    log.info("Retrieved open poll %s", poll.id);
+    res.json({ poll });
+  } catch (error) {
+    log.error(error, "Error fetching open polls");
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// Vote on a poll
+router.post("/:id/vote", async (req, res) => {
+  try {
+    const { choice } = req.body;
+    const pollId = req.params.id;
+    
+    // Get or create client_id from cookie
+    let clientId = req.cookies?.client_id;
+    if (!clientId) {
+      clientId = uuidv4();
+      res.cookie("client_id", clientId, { 
+        maxAge: 365 * 24 * 60 * 60 * 1000, // 1 year
+        httpOnly: true 
+      });
+    }
+
+    log.info("Processing vote for poll %s, client %s, choice %d", pollId, clientId, choice);
+
+    // Validate choice (0=yes, 1=no)
+    if (choice !== 0 && choice !== 1) {
+      return res.status(400).json({ error: "Invalid choice. Must be 0 (yes) or 1 (no)" });
+    }
+
+    // Check if poll exists and is still open
+    const { data: poll, error: pollError } = await supabase
+      .from("polls")
+      .select("*")
+      .eq("id", pollId)
+      .single();
+
+    if (pollError || !poll) {
+      log.error(pollError, "Poll not found: %s", pollId);
+      return res.status(404).json({ error: "Poll not found" });
+    }
+
+    if (new Date(poll.closes_at) < new Date()) {
+      return res.status(400).json({ error: "Poll is closed" });
+    }
+
+    // Insert or update vote (upsert)
+    const { data, error } = await supabase
+      .from("votes")
+      .upsert({
+        poll_id: pollId,
+        client_id: clientId,
+        choice: choice
+      }, {
+        onConflict: "poll_id,client_id"
+      });
+
+    if (error) {
+      if (error.message.includes("duplicate")) {
+        log.warn("Poll duplicate client_id %s", clientId);
+        // Try to update existing vote
+        const { error: updateError } = await supabase
+          .from("votes")
+          .update({ choice })
+          .eq("poll_id", pollId)
+          .eq("client_id", clientId);
+        
+        if (updateError) {
+          log.error(updateError, "Failed to update vote");
+          return res.status(500).json({ error: "Failed to record vote" });
+        }
+      } else {
+        log.error(error, "Failed to record vote");
+        return res.status(500).json({ error: "Failed to record vote" });
+      }
+    }
+
+    log.info("Vote recorded successfully for client %s", clientId);
+    res.json({ success: true, clientId });
+  } catch (error) {
+    log.error(error, "Error recording vote");
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// Create a new poll
+router.post("/create", async (req, res) => {
+  try {
+    const { question, closes_at } = req.body;
+    
+    log.info("Creating new poll: %s", question);
+
+    const { data, error } = await supabase
+      .from("polls")
+      .insert({
+        question,
+        options: ["yes", "no"],
+        closes_at: closes_at || new Date(Date.now() + 7 * 24 * 60 * 60 * 1000) // Default: 1 week from now
+      })
+      .select()
+      .single();
+
+    if (error) {
+      log.error(error, "Failed to create poll");
+      return res.status(500).json({ error: "Failed to create poll" });
+    }
+
+    log.info("Poll created with ID %s", data.id);
+    res.json({ poll: data });
+  } catch (error) {
+    log.error(error, "Error creating poll");
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// Close current poll and tally results
+router.post("/close-current", async (req, res) => {
+  try {
+    log.info("Closing current poll and tallying results");
+
+    // Get the most recent open poll
+    const { data: polls, error: pollError } = await supabase
+      .from("polls")
+      .select("*")
+      .gt("closes_at", new Date().toISOString())
+      .order("closes_at", { ascending: true })
+      .limit(1);
+
+    if (pollError || !polls || polls.length === 0) {
+      log.info("No open polls to close");
+      return res.json({ message: "No open polls to close" });
+    }
+
+    const poll = polls[0];
+    
+    // Get vote counts
+    const { data: votes, error: voteError } = await supabase
+      .from("votes")
+      .select("choice")
+      .eq("poll_id", poll.id);
+
+    if (voteError) {
+      log.error(voteError, "Failed to fetch votes for poll %s", poll.id);
+      return res.status(500).json({ error: "Failed to tally votes" });
+    }
+
+    const yesVotes = votes?.filter(v => v.choice === 0).length || 0;
+    const noVotes = votes?.filter(v => v.choice === 1).length || 0;
+    const totalVotes = yesVotes + noVotes;
+    
+    // Update poll to close it
+    const { error: closeError } = await supabase
+      .from("polls")
+      .update({ closes_at: new Date().toISOString() })
+      .eq("id", poll.id);
+
+    if (closeError) {
+      log.error(closeError, "Failed to close poll %s", poll.id);
+      return res.status(500).json({ error: "Failed to close poll" });
+    }
+
+    const result = {
+      pollId: poll.id,
+      question: poll.question,
+      totalVotes,
+      results: {
+        yes: yesVotes,
+        no: noVotes,
+        winner: yesVotes > noVotes ? "yes" : noVotes > yesVotes ? "no" : "tie"
+      }
+    };
+
+    log.info("Poll %s closed. Results: %o", poll.id, result.results);
+    res.json(result);
+  } catch (error) {
+    log.error(error, "Error closing poll");
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+export default router;
+</file>
+
+<file path="server/sched/closePoll.ts">
+import cron from "node-cron";
+import { createClient } from "@supabase/supabase-js";
+import { cloud } from "../../src/lib/cloudClient";
+const log = require("pino")();
+
+// Initialize Supabase client
+const supabase = createClient(
+  process.env.SUPABASE_URL!,
+  process.env.SUPABASE_ANON_KEY!
+);
+
+export async function closePollAndTally() {
+  try {
+    log.info("Starting scheduled poll closure and tally");
+
+    // Get the most recent open poll
+    const { data: polls, error: pollError } = await supabase
+      .from("polls")
+      .select("*")
+      .gt("closes_at", new Date().toISOString())
+      .order("closes_at", { ascending: true })
+      .limit(1);
+
+    if (pollError) {
+      log.error(pollError, "Failed to fetch open polls");
+      return;
+    }
+
+    if (!polls || polls.length === 0) {
+      log.info("No open polls to close");
+      return;
+    }
+
+    const poll = polls[0];
+    log.info("Closing poll %s: %s", poll.id, poll.question);
+
+    // Get vote counts
+    const { data: votes, error: voteError } = await supabase
+      .from("votes")
+      .select("choice")
+      .eq("poll_id", poll.id);
+
+    if (voteError) {
+      log.error(voteError, "Failed to fetch votes for poll %s", poll.id);
+      return;
+    }
+
+    const yesVotes = votes?.filter(v => v.choice === 0).length || 0;
+    const noVotes = votes?.filter(v => v.choice === 1).length || 0;
+    const totalVotes = yesVotes + noVotes;
+    
+    // Update poll to close it
+    const { error: closeError } = await supabase
+      .from("polls")
+      .update({ closes_at: new Date().toISOString() })
+      .eq("id", poll.id);
+
+    if (closeError) {
+      log.error(closeError, "Failed to close poll %s", poll.id);
+      return;
+    }
+
+    const winner = yesVotes > noVotes ? "yes" : noVotes > yesVotes ? "no" : "tie";
+    const result = {
+      pollId: poll.id,
+      question: poll.question,
+      totalVotes,
+      results: { yes: yesVotes, no: noVotes, winner }
+    };
+
+    log.info("Poll %s closed. Results: %o", poll.id, result.results);
+
+    // Store poll results in Bootoshi Cloud for agent context
+    try {
+      await cloud("add", {
+        agent_id: "poll",
+        run_id: "weekly",
+        memories: `Poll closed: "${poll.question}". Results: ${yesVotes} yes, ${noVotes} no (${totalVotes} total votes). Winner: ${winner}`,
+        store_mode: "vector",
+        metadata: { 
+          ...result,
+          ts: Date.now(),
+          type: "poll_result"
+        },
+        skip_extraction: true
+      });
+      log.info("Poll results saved to Bootoshi Cloud");
+    } catch (cloudError) {
+      log.error(cloudError, "Failed to save poll results to Bootoshi Cloud");
+    }
+
+    // TODO: Create new poll for next week
+    // This could be enhanced to automatically generate a new poll question
+    // based on the story context or current events
+    
+  } catch (error) {
+    log.error(error, "Error in scheduled poll closure");
+  }
+}
+
+// Schedule the poll closure job to run every Saturday at 23:59 UTC
+export function startPollScheduler() {
+  // Run every Saturday at 23:59 UTC
+  cron.schedule("59 23 * * 6", async () => {
+    log.info("Triggered scheduled poll closure");
+    await closePollAndTally();
+  }, {
+    timezone: "UTC"
+  });
+
+  log.info("Poll scheduler started - will close polls every Saturday at 23:59 UTC");
+}
+
+// Allow manual execution for testing
+if (require.main === module) {
+  log.info("Running poll closure manually");
+  closePollAndTally().then(() => {
+    log.info("Manual poll closure completed");
+    process.exit(0);
+  }).catch((error) => {
+    log.error(error, "Manual poll closure failed");
+    process.exit(1);
+  });
+}
+</file>
+
+<file path="src/agents/chapterAgent.ts">
+import { FeatherAgent } from "feather-ai";
+import { cloud } from "../lib/cloudClient";
+const log = require("pino")();
+
+export const ChapterAgent = new FeatherAgent({
+  model: "openai/gpt-4o-mini",
+  systemPrompt: `You are the Bald Brothers Scribe, a master storyteller tasked with continuing the epic saga of the Bald Brothers. Your role is to generate compelling, engaging chapters that build upon the existing lore and narrative threads.
+
+Guidelines:
+- Write in a dramatic, engaging narrative style
+- Maintain consistency with previous chapters and established lore
+- Each chapter should be 400+ characters and advance the story meaningfully
+- Include vivid descriptions, character development, and plot progression
+- End chapters on compelling notes that encourage readers to continue
+
+You have access to tools to retrieve recent story context and save new chapters.`,
+  tools: [
+    {
+      type: "function",
+      function: {
+        name: "get_recent",
+        description: "Retrieve the last 3 chapters/memories from the story canon",
+        parameters: {
+          type: "object",
+          properties: {},
+          required: []
+        }
+      },
+      execute: async () => {
+        log.info("Fetching last 3 memories");
+        return await cloud("query", { agent_id: "chapter", run_id: "canon", limit: 3 });
+      }
+    },
+    {
+      type: "function",
+      function: {
+        name: "save",
+        description: "Save the new chapter content to long-term memory",
+        parameters: {
+          type: "object",
+          properties: {
+            content: {
+              type: "string",
+              description: "The chapter content to save"
+            }
+          },
+          required: ["content"]
+        }
+      },
+      execute: async (args: Record<string, any>) => {
+        const { content } = args as { content: string };
+        log.info("Saving new chapter to mem0");
+        return await cloud("add", {
+          agent_id: "chapter",
+          run_id: "canon",
+          memories: content,
+          store_mode: "vector",
+          metadata: { ts: Date.now() },
+          skip_extraction: true
+        });
+      }
+    }
+  ]
+});
+</file>
+
+<file path="src/components/Poll.tsx">
+import React, { useState, useEffect } from 'react';
+
+interface Poll {
+  id: string;
+  question: string;
+  options: string[];
+  closes_at: string;
+}
+
+interface PollApiResponse {
+  poll: Poll | null;
+}
+
+interface VoteResponse {
+  success: boolean;
+  clientId: string;
+}
+
+export function Poll() {
+  const [poll, setPoll] = useState<Poll | null>(null);
+  const [selectedChoice, setSelectedChoice] = useState<number | null>(null);
+  const [hasVoted, setHasVoted] = useState<boolean>(false);
+  const [loading, setLoading] = useState<boolean>(true);
+  const [voting, setVoting] = useState<boolean>(false);
+  const [error, setError] = useState<string | null>(null);
+
+  // Fetch the current open poll
+  useEffect(() => {
+    fetchOpenPoll();
+  }, []);
+
+  const fetchOpenPoll = async () => {
+    try {
+      setLoading(true);
+      const response = await fetch('/polls/open');
+      const data = await response.json() as PollApiResponse;
+      
+      if (!response.ok) {
+        throw new Error('Failed to fetch poll');
+      }
+
+      setPoll(data.poll);
+      setError(null);
+    } catch (err) {
+      setError('Failed to load poll');
+      console.error('Error fetching poll:', err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const submitVote = async () => {
+    if (!poll || selectedChoice === null) return;
+
+    try {
+      setVoting(true);
+      const response = await fetch(`/polls/${poll.id}/vote`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ choice: selectedChoice }),
+      });
+
+      const data = await response.json() as VoteResponse;
+
+      if (!response.ok) {
+        throw new Error('Failed to submit vote');
+      }
+
+      setHasVoted(true);
+      setError(null);
+    } catch (err) {
+      setError('Failed to submit vote');
+      console.error('Error submitting vote:', err);
+    } finally {
+      setVoting(false);
+    }
+  };
+
+  const handleChoiceChange = (choice: number) => {
+    setSelectedChoice(choice);
+  };
+
+  if (loading) {
+    return (
+      <div className="poll-container">
+        <div className="loading">Loading poll...</div>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="poll-container">
+        <div className="error">{error}</div>
+        <button onClick={fetchOpenPoll}>Retry</button>
+      </div>
+    );
+  }
+
+  if (!poll) {
+    return (
+      <div className="poll-container">
+        <div className="no-poll">No active poll at this time.</div>
+      </div>
+    );
+  }
+
+  const isExpired = new Date(poll.closes_at) < new Date();
+
+  if (hasVoted || isExpired) {
+    return (
+      <div className="poll-container">
+        <h2>Poll</h2>
+        <div className="poll-question">{poll.question}</div>
+        <div className="poll-status">
+          {hasVoted ? "Thanks for voting! " : ""}
+          {isExpired ? "This poll has ended." : "Poll is still active."}
+        </div>
+        {!isExpired && (
+          <div className="poll-info">
+            Closes: {new Date(poll.closes_at).toLocaleString()}
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  return (
+    <div className="poll-container">
+      <h2>Weekly Poll</h2>
+      <div className="poll-question">{poll.question}</div>
+      
+      <div className="poll-options">
+        <label className="poll-option">
+          <input
+            type="radio"
+            name="poll-choice"
+            value={0}
+            checked={selectedChoice === 0}
+            onChange={() => handleChoiceChange(0)}
+          />
+          <span className="option-text">Yes</span>
+        </label>
+        
+        <label className="poll-option">
+          <input
+            type="radio"
+            name="poll-choice"
+            value={1}
+            checked={selectedChoice === 1}
+            onChange={() => handleChoiceChange(1)}
+          />
+          <span className="option-text">No</span>
+        </label>
+      </div>
+
+      <button 
+        onClick={submitVote}
+        disabled={selectedChoice === null || voting}
+        className="vote-button"
+      >
+        {voting ? 'Submitting...' : 'Submit Vote'}
+      </button>
+
+      <div className="poll-info">
+        Closes: {new Date(poll.closes_at).toLocaleString()}
+      </div>
+
+    </div>
+  );
+}
+</file>
+
+<file path="src/lib/cloudClient.ts">
+import fetch from "node-fetch";
+import "dotenv/config";
+const { CLOUD_URL, CLOUD_PASSWORD } = process.env;
+const log = require("pino")();
+
+export async function cloud(path: string, data: any) {
+  log.info("cloud %s %o", path, data);
+  const res = await fetch(`${CLOUD_URL}/${path}`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "X-Password": CLOUD_PASSWORD!
+    },
+    body: JSON.stringify(data)
+  });
+  if (!res.ok) throw new Error(`Cloud error ${res.status}`);
+  return res.json();
+}
+</file>
+
+<file path="tsconfig.json">
+{
+  "compilerOptions": {
+    "target": "ES2020",
+    "module": "commonjs",
+    "lib": ["ES2020"],
+    "outDir": "./dist",
+    "rootDir": "./",
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
+    "resolveJsonModule": true,
+    "declaration": true,
+    "declarationMap": true,
+    "sourceMap": true,
+    "jsx": "react-jsx",
+    "moduleResolution": "node",
+    "allowSyntheticDefaultImports": true,
+    "experimentalDecorators": true,
+    "emitDecoratorMetadata": true,
+    "baseUrl": ".",
+    "paths": {
+      "@/*": ["src/*"],
+      "@/lib/*": ["src/lib/*"],
+      "@/agents/*": ["src/agents/*"],
+      "@/components/*": ["src/components/*"]
+    }
+  },
+  "include": [
+    "src/**/*",
+    "server/**/*",
+    "*.ts",
+    "*.tsx"
+  ],
+  "exclude": [
+    "node_modules",
+    "dist",
+    "**/*.test.ts",
+    "**/*.spec.ts"
+  ]
+}
+</file>
+
+</files>
