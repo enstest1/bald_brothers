@@ -4,6 +4,7 @@
   "description": "Bald Brothers Story Engine",
   "main": "dist/server.js",
   "scripts": {
+    "prebuild": "npm install",
     "build": "tsc",
     "start": "node dist/server.js",
     "dev": "tsc && node dist/server.js",
