@@ -53,20 +53,7 @@ app.get("/health", (req, res) => {
 
 // Root endpoint
 app.get("/", (req, res) => {
-  res.json({
-    message: "Bald Brothers Story Engine API",
-    version: "1.0.0",
-    endpoints: {
-      health: "GET /health",
-      chapters: "POST /api/worlds/:id/arcs/:arcId/progress",
-      polls: {
-        open: "GET /polls/open",
-        vote: "POST /polls/:id/vote",
-        create: "POST /polls/create", 
-        close: "POST /polls/close-current"
-      }
-    }
-  });
+  res.sendFile("index.html", { root: "public" });
 });
 
 // Error handling middleware
