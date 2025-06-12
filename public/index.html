@@ -118,9 +118,9 @@
     </section>
     <!-- Story area -->
     <section class="story" id="story-section">
-      <h2>Latest Chapter</h2>
-      <p>Click "Generate New Chapter" to create content!</p>
-      <button onclick="generateChapter()">Generate New Chapter</button>
+      <h2 id="story-heading">The story begins soon...</h2>
+      <div id="countdown" style="font-size:1.5rem;margin:1rem 0;"></div>
+      <div id="chapter-content" style="display:none;"></div>
     </section>
     <!-- Footer -->
     <footer>
@@ -129,23 +129,62 @@
     </footer>
   </div>
   <script>
-    // Load current poll
-    fetch('/polls/open')
-      .then(r => r.json())
-      .then(data => {
-        const pollDiv = document.getElementById('current-poll');
-        if (data.poll) {
-          pollDiv.innerHTML = `
-            <h2>Current Poll</h2>
-            <p><strong>${data.poll.question}</strong></p>
-            <button onclick="vote(0)">Yes</button>
-            <button onclick="vote(1)">No</button>
-            <p><small>Closes: ${new Date(data.poll.closes_at).toLocaleString()}</small></p>
-          `;
-        } else {
-          pollDiv.innerHTML = '<h2>No active poll</h2>';
-        }
-      });
+    // Countdown logic
+    let countdownSeconds = 120; // 2 minutes for testing
+    let countdownInterval;
+    const countdownDiv = document.getElementById('countdown');
+    const storyHeading = document.getElementById('story-heading');
+    const chapterContent = document.getElementById('chapter-content');
+    const pollSection = document.getElementById('poll-section');
+    pollSection.style.display = 'none'; // Hide poll until chapter is posted
+
+    function updateCountdown() {
+      const min = Math.floor(countdownSeconds / 60);
+      const sec = countdownSeconds % 60;
+      countdownDiv.textContent = `Chapter posts in ${min}:${sec.toString().padStart(2, '0')}`;
+      if (countdownSeconds <= 0) {
+        clearInterval(countdownInterval);
+        postFirstChapter();
+      }
+      countdownSeconds--;
+    }
+
+    function postFirstChapter() {
+      // Simulate AI chapter generation (replace with real fetch in production)
+      storyHeading.textContent = 'Chapter 1: The Bald Brothers Awaken';
+      countdownDiv.style.display = 'none';
+      chapterContent.style.display = 'block';
+      chapterContent.innerHTML = `<p>In the ancient halls of the Bald Brotherhood, two brothers rise to greet the dawn. Their heads gleam with wisdom and resolve. The world awaits their first decision...</p>`;
+      pollSection.style.display = 'block';
+      loadPoll();
+    }
+
+    countdownInterval = setInterval(updateCountdown, 1000);
+    updateCountdown();
+
+    // Load poll (now called after chapter is posted)
+    function loadPoll() {
+      fetch('/polls/open')
+        .then(r => r.json())
+        .then(data => {
+          const pollDiv = document.getElementById('current-poll');
+          if (data.poll) {
+            // Support multiple options
+            let optionsHtml = '';
+            data.poll.options.forEach((opt, idx) => {
+              optionsHtml += `<button onclick="vote(${idx})">${opt}</button> `;
+            });
+            pollDiv.innerHTML = `
+              <h2>Current Poll</h2>
+              <p><strong>${data.poll.question}</strong></p>
+              ${optionsHtml}
+              <p><small>Closes: ${new Date(data.poll.closes_at).toLocaleString()}</small></p>
+            `;
+          } else {
+            pollDiv.innerHTML = '<h2>No active poll</h2>';
+          }
+        });
+    }
     // Vote function
     async function vote(choice) {
       const polls = await fetch('/polls/open').then(r => r.json());
@@ -154,32 +193,9 @@
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ choice })
-        }).then(() => alert('Vote submitted!'));
-      }
-    }
-    // Generate chapter function
-    async function generateChapter() {
-      document.getElementById('story-section').innerHTML = '<h2>Generating chapter...</h2>';
-      try {
-        const response = await fetch('/api/worlds/1/arcs/1/progress', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': 'Bearer ' + prompt('Enter API token:')
-          }
+        }).then(() => {
+          document.getElementById('current-poll').innerHTML = '<h3>Thank you for voting!</h3>';
         });
-        const data = await response.json();
-        document.getElementById('story-section').innerHTML = `
-          <h2>Latest Chapter</h2>
-          <p>${data.body}</p>
-          <button onclick="generateChapter()">Generate New Chapter</button>
-        `;
-      } catch (error) {
-        document.getElementById('story-section').innerHTML = `
-          <h2>Error</h2>
-          <p>Failed to generate chapter: ${error.message}</p>
-          <button onclick="generateChapter()">Try Again</button>
-        `;
       }
     }
   </script>
