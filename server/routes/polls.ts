@@ -279,7 +279,7 @@ router.post("/close-current", async (req, res) => {
         .insert({
           question: pollQuestion,
           options: pollOptions,
-          closes_at: new Date(Date.now() + (process.env.NODE_ENV === 'production' ? 24 * 60 * 60 * 1000 : 60 * 1000))
+          closes_at: new Date(Date.now() + (process.env.NODE_ENV === 'production' ? 24 * 60 * 60 * 1000 : 10 * 1000))
         })
         .select()
         .single();
