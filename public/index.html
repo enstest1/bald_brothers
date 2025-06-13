@@ -262,14 +262,14 @@
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ choice })
         }).then(() => {
-          // After voting, show results but keep showing timer
-          startPollCountdown();
+          // After voting, show results and a thank you message, then auto-refresh
+          showPollResults(polls.poll.id, true, true); // pass thankYou flag
         });
       }
     }
 
     // Show poll results (vote counts per option)
-    function showPollResults(pollId, autoRefresh) {
+    function showPollResults(pollId, autoRefresh, thankYou) {
       fetch(`/polls/${pollId}/results`)
         .then(r => r.json())
         .then(data => {
@@ -278,6 +278,9 @@
             let resultsHtml = `<h2>Poll Results</h2>`;
             if (poll) {
               resultsHtml += `<p><strong>${poll.question}</strong></p>`;
+            }
+            if (thankYou) {
+              resultsHtml += `<div style='color:#ffe600;font-weight:bold;margin-bottom:1em;'>Thank you for voting!</div>`;
             }
             resultsHtml += '<ul>';
             data.results.forEach(r => {

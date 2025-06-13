@@ -3,7 +3,7 @@ import { createClient } from "@supabase/supabase-js";
 import { v4 as uuidv4 } from "uuid";
 import { cloud } from "../../src/lib/cloudClient";
 import { ChapterAgent } from "../../src/agents/chapterAgent";
-const log = require("pino")();
+import winston from 'winston';
 
 const router = express.Router();
 
@@ -12,6 +12,20 @@ const supabase = createClient(
   process.env.SUPABASE_URL!,
   process.env.SUPABASE_ANON_KEY!
 );
+
+// Winston logger configuration
+const log = winston.createLogger({
+  level: 'info',
+  format: winston.format.combine(
+    winston.format.timestamp(),
+    winston.format.printf(({ timestamp, level, message, ...meta }) => {
+      return `${timestamp} [${level.toUpperCase()}]: ${message} ${Object.keys(meta).length ? JSON.stringify(meta) : ''}`;
+    })
+  ),
+  transports: [
+    new winston.transports.Console(),
+  ],
+});
 
 // Get the currently open poll
 router.get("/open", async (req, res) => {

@@ -19,6 +19,8 @@ The Bald Brothers Story Engine is a sophisticated story generation system that a
 - Implemented dynamic poll options based on user votes
 - Enhanced poll closure mechanism
 - Added vote validation and duplicate prevention
+- Improved poll voting UX: after voting, users see results and a thank you message, then auto-refresh for next poll
+- Switched backend poll logging from pino to Winston for consistency and advanced logging features
 
 ### 2. Chapter Generation Improvements
 - Extended chapter length for better story development
