@@ -205,6 +205,7 @@
     // --- POLL LOGIC ENHANCEMENT ---
     let pollData = null;
     let pollCountdownInterval = null;
+    let postPollCountdownInterval = null;
 
     function loadPoll() {
       fetch('/polls/open')
@@ -216,13 +217,13 @@
             // Show poll with countdown
             let optionsHtml = '';
             pollData.options.forEach((opt, idx) => {
-              optionsHtml += `<button onclick="vote(${idx})">${opt}</button> `;
+              optionsHtml += `<button onclick=\"vote(${idx})\">${opt}</button> `;
             });
             pollDiv.innerHTML = `
               <h2>Current Poll</h2>
               <p><strong>${pollData.question}</strong></p>
               ${optionsHtml}
-              <div id="poll-timer"></div>
+              <div id=\"poll-timer\"></div>
               <p><small>Closes: ${new Date(pollData.closes_at).toLocaleString()}</small></p>
             `;
             startPollCountdown();
@@ -234,6 +235,7 @@
 
     function startPollCountdown() {
       clearInterval(pollCountdownInterval);
+      clearInterval(postPollCountdownInterval);
       if (!pollData) return;
       const timerDiv = document.getElementById('poll-timer');
       function updatePollTimer() {
@@ -260,8 +262,8 @@
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ choice })
         }).then(() => {
-          // After voting, show results
-          showPollResults(polls.poll.id, false);
+          // After voting, show results but keep showing timer
+          startPollCountdown();
         });
       }
     }
@@ -282,14 +284,22 @@
               resultsHtml += `<li>${r.option}: ${r.count} vote${r.count !== 1 ? 's' : ''}</li>`;
             });
             resultsHtml += '</ul>';
+            // Show a post-poll countdown before auto-refresh
+            resultsHtml += `<div id=\"post-poll-timer\" style=\"margin-top:1rem;font-size:1.2rem;\"></div>`;
             document.getElementById('current-poll').innerHTML = resultsHtml;
-            // After showing results, auto-refresh for next poll/chapter
             if (autoRefresh) {
-              setTimeout(() => {
-                // Try to reload poll, if no poll, reload chapter
-                loadPoll();
-                // Optionally, reload chapter content here if needed
-              }, 4000); // 4 seconds to view results
+              let postCountdown = 10;
+              const postTimerDiv = document.getElementById('post-poll-timer');
+              function updatePostTimer() {
+                postTimerDiv.textContent = `Next chapter in ${postCountdown}s...`;
+                if (postCountdown <= 0) {
+                  clearInterval(postPollCountdownInterval);
+                  loadPoll(); // This will show the new poll/chapter
+                }
+                postCountdown--;
+              }
+              updatePostTimer();
+              postPollCountdownInterval = setInterval(updatePostTimer, 1000);
             }
           });
         });

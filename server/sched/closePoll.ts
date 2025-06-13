@@ -106,15 +106,23 @@ export async function closePollAndTally() {
 
 // Schedule the poll closure job to run every Saturday at 23:59 UTC
 export function startPollScheduler() {
-  // Run every Saturday at 23:59 UTC
-  cron.schedule("59 23 * * 6", async () => {
-    log.info("Triggered scheduled poll closure");
-    await closePollAndTally();
-  }, {
-    timezone: "UTC"
-  });
-
-  log.info("Poll scheduler started - will close polls every Saturday at 23:59 UTC");
+  if (process.env.NODE_ENV === 'production') {
+    // Run every Saturday at 23:59 UTC
+    cron.schedule("59 23 * * 6", async () => {
+      log.info("Triggered scheduled poll closure (production)");
+      await closePollAndTally();
+    }, {
+      timezone: "UTC"
+    });
+    log.info("Poll scheduler started - will close polls every Saturday at 23:59 UTC (production mode)");
+  } else {
+    // Run every 10 seconds in development
+    cron.schedule("*/10 * * * * *", async () => {
+      log.info("Triggered scheduled poll closure (development, every 10s)");
+      await closePollAndTally();
+    });
+    log.info("Poll scheduler started - will close polls every 10 seconds (development mode)");
+  }
 }
 
 // Allow manual execution for testing
