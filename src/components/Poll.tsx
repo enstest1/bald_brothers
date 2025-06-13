@@ -16,6 +16,8 @@ interface VoteResponse {
   clientId: string;
 }
 
+type PollResultsResponse = { results: { option: string; count: number }[] };
+
 export function Poll() {
   const [poll, setPoll] = useState<Poll | null>(null);
   const [selectedChoice, setSelectedChoice] = useState<number | null>(null);
@@ -35,10 +37,10 @@ export function Poll() {
     if ((hasVoted || (poll && new Date(poll.closes_at) < new Date())) && poll) {
       fetch(`/polls/${poll.id}/results`)
         .then(r => r.json())
-        .then((data: unknown) => {
-          // Type guard for results
-          if (data && typeof data === 'object' && 'results' in data && Array.isArray((data as any).results)) {
-            setResults((data as { results: { option: string; count: number }[] }).results);
+        .then((data) => {
+          const resultsData = data as PollResultsResponse;
+          if (resultsData && resultsData.results) {
+            setResults(resultsData.results);
           } else {
             setResults(null);
           }
@@ -89,7 +91,7 @@ export function Poll() {
       setHasVoted(true);
       // Immediately fetch results after voting
       const resultsResponse = await fetch(`/polls/${poll.id}/results`);
-      const resultsData = await resultsResponse.json();
+      const resultsData = await resultsResponse.json() as PollResultsResponse;
       if (resultsData && resultsData.results) {
         setResults(resultsData.results);
       }
@@ -144,16 +146,13 @@ export function Poll() {
         </div>
         {results && (
           <div className="poll-results">
-            <div className="result-bar">
-              <div className="yes-bar" style={{ width: `${(results[0].count / (results[0].count + results[1].count)) * 100}%` }}>
-                Yes: {results[0].count} votes
-              </div>
-              <div className="no-bar" style={{ width: `${(results[1].count / (results[0].count + results[1].count)) * 100}%` }}>
-                No: {results[1].count} votes
-              </div>
-            </div>
+            <ul>
+              {results.map((r, i) => (
+                <li key={i}>{r.option}: {r.count} vote{r.count !== 1 ? 's' : ''}</li>
+              ))}
+            </ul>
             <div className="total-votes">
-              Total votes: {results[0].count + results[1].count}
+              Total votes: {results.reduce((sum, r) => sum + r.count, 0)}
             </div>
           </div>
         )}
@@ -172,27 +171,18 @@ export function Poll() {
       <div className="poll-question">{poll.question}</div>
       
       <div className="poll-options">
-        <label className="poll-option">
-          <input
-            type="radio"
-            name="poll-choice"
-            value={0}
-            checked={selectedChoice === 0}
-            onChange={() => handleChoiceChange(0)}
-          />
-          <span className="option-text">Yes</span>
-        </label>
-        
-        <label className="poll-option">
-          <input
-            type="radio"
-            name="poll-choice"
-            value={1}
-            checked={selectedChoice === 1}
-            onChange={() => handleChoiceChange(1)}
-          />
-          <span className="option-text">No</span>
-        </label>
+        {poll.options.map((opt, idx) => (
+          <label className="poll-option" key={idx}>
+            <input
+              type="radio"
+              name="poll-choice"
+              value={idx}
+              checked={selectedChoice === idx}
+              onChange={() => handleChoiceChange(idx)}
+            />
+            <span className="option-text">{opt}</span>
+          </label>
+        ))}
       </div>
 
       <button 
