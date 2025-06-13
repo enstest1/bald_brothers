@@ -45,9 +45,15 @@ export async function closePollAndTally() {
       return;
     }
 
-    const yesVotes = votes?.filter(v => v.choice === 0).length || 0;
-    const noVotes = votes?.filter(v => v.choice === 1).length || 0;
-    const totalVotes = yesVotes + noVotes;
+    // Get vote counts for each option (dynamic)
+    const options: string[] = poll.options;
+    const counts = options.map((opt: string, idx: number) => ({
+      option: opt,
+      count: votes.filter((v: { choice: number }) => v.choice === idx).length
+    }));
+    const totalVotes = votes.length;
+    // Optionally, determine winner (option with most votes)
+    const winner = counts.reduce((max, curr) => curr.count > max.count ? curr : max, counts[0]);
     
     // Update poll to close it
     const { error: closeError } = await supabase
@@ -60,12 +66,12 @@ export async function closePollAndTally() {
       return;
     }
 
-    const winner = yesVotes > noVotes ? "yes" : noVotes > yesVotes ? "no" : "tie";
     const result = {
       pollId: poll.id,
       question: poll.question,
       totalVotes,
-      results: { yes: yesVotes, no: noVotes, winner }
+      results: counts,
+      winner: winner.option
     };
 
     log.info("Poll %s closed. Results: %o", poll.id, result.results);
@@ -75,7 +81,7 @@ export async function closePollAndTally() {
       await cloud("add", {
         agent_id: "poll",
         run_id: "weekly",
-        memories: `Poll closed: "${poll.question}". Results: ${yesVotes} yes, ${noVotes} no (${totalVotes} total votes). Winner: ${winner}`,
+        memories: `Poll closed: "${poll.question}". Results: ${JSON.stringify(result.results)}. Winner: ${result.winner}`,
         store_mode: "vector",
         metadata: { 
           ...result,

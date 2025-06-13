@@ -1,5 +1,134 @@
 ---
-description:
-globs:
+description: 
+globs: 
 alwaysApply: false
 ---
+# Code Styling Guidelines
+
+This document defines the preferred code style for the Bald Brothers Story Engine project, primarily for TypeScript. Adhering to a consistent style improves code readability and maintainability. While no automated linter/formatter (like ESLint/Prettier) configuration is explicitly present in the project files, these guidelines are based on observed patterns and common best practices.
+
+## 1. Formatting
+
+*   **Indentation**: Use **2 spaces** for indentation. Do not use tabs.
+*   **Line Length**: Aim for a maximum line length of 100-120 characters to improve readability. This is a soft limit; clarity is more important.
+*   **Semicolons**: **Use semicolons** at the end of statements.
+    ```typescript
+    const name = "Bald Brothers";
+    log.info("Initialized.");
+    ```
+*   **Braces**:
+    *   Opening braces (`{`) for blocks (functions, if/else, loops, try/catch) should generally be on the same line as the statement.
+    *   Closing braces (`}`) should be on a new line, aligned with the start of the block.
+    ```typescript
+    if (condition) {
+      // code
+    } else {
+      // code
+    }
+
+    function example() {
+      // code
+    }
+    ```
+*   **Spacing**:
+    *   Use a single space after commas in argument lists, array literals, and object literals.
+    *   Use spaces around operators (`=`, `+`, `-`, `*`, `/`, `===`, `&&`, `||`, etc.).
+        ```typescript
+        const sum = a + b;
+        const arr = [1, 2, 3];
+        const obj = { key: 'value', another: 10 };
+        ```
+    *   No space between a function name and its opening parenthesis `()`.
+        ```typescript
+        myFunction(arg1, arg2);
+        ```
+
+## 2. Naming Conventions
+
+*   **Variables and Functions**: Use `camelCase`.
+    ```typescript
+    const chapterAgent = new FeatherAgent();
+    async function fetchData() { /* ... */ }
+    ```
+*   **Classes, Interfaces, Enums, Type Aliases**: Use `PascalCase`.
+    ```typescript
+    class ChapterAgent { /* ... */ }
+    interface Poll { /* ... */ }
+    type ApiResponse = { /* ... */ };
+    ```
+*   **Constants**: Use `UPPER_SNAKE_CASE` for true constants (values that are fixed and widely used). Environment variables from `process.env` are often like this.
+    ```typescript
+    const PORT = process.env.PORT || 3000;
+    const MAX_RETRIES = 3;
+    ```
+*   **File Names**: Use `camelCase` (e.g., `chapterAgent.ts`, `cloudClient.ts`) or `kebab-case` if preferred for new files, but `camelCase` is prevalent. For React components (`.tsx`), `PascalCase` is standard (e.g., `Poll.tsx`).
+
+## 3. Language Features (TypeScript)
+
+*   **`const` vs `let`**: Prefer `const` for variable declarations unless the variable needs to be reassigned. Use `let` only when reassignment is necessary. Avoid `var`.
+*   **Arrow Functions**: Use arrow functions for callbacks and anonymous functions, especially when `this` context needs to be preserved or for conciseness.
+    ```typescript
+    items.map(item => item.id);
+    app.get("/health", (req, res) => {
+      res.json({ status: "ok" });
+    });
+    ```
+*   **Modules**: Use ES6 modules (`import`/`export`).
+    ```typescript
+    import express from "express";
+    export const ChapterAgent = new FeatherAgent({ /* ... */ });
+    export default router;
+    ```
+    The project uses `const log = require("pino")();` in several places. For consistency in new TypeScript files, ES module syntax is preferred if `pino` supports it well with the current `moduleResolution` settings.
+*   **Type Annotations**: Provide explicit type annotations for function parameters, return types, and variable declarations where type inference is not clear or to enforce a contract.
+    ```typescript
+    function greet(name: string): string {
+      return `Hello, ${name}`;
+    }
+    const poll: Poll | null = null;
+    ```
+*   **`async/await`**: Use `async/await` for handling Promises to improve readability of asynchronous code. Always handle potential promise rejections with `try...catch` or `.catch()`.
+    ```typescript
+    async function processData() {
+      try {
+        const data = await fetchData();
+        // ...
+      } catch (error) {
+        log.error(error, "Failed to process data");
+      }
+    }
+    ```
+*   **Strict Mode**: The `tsconfig.json` has `strict: true` enabled. Adhere to strict type checking rules.
+*   **Quotes**:
+    *   For string literals, single quotes (`'`) are generally preferred (e.g., `'hello'`). This is observed in much of the code.
+    *   Double quotes (`"`) are used for JSX attributes (e.g., `<div className="poll-container">`).
+    *   Pino log messages with substitutions sometimes use double quotes (`log.info("Server started on port %d", PORT);`), but this is part of the string literal itself.
+    *   **Guideline**: Prefer single quotes for general TypeScript string literals. Use double quotes for JSX attributes.
+
+## 4. Comments
+
+*   Follow the guidelines in `commenting-guidlines.md`.
+
+## 5. TypeScript Configuration (`tsconfig.json`)
+
+The existing `tsconfig.json` defines important compiler options:
+*   `"target": "ES2020"`
+*   `"module": "commonjs"` (Note: this means ES module syntax in TS gets compiled to CommonJS for Node.js)
+*   `"strict": true`
+*   `"esModuleInterop": true`
+*   `"jsx": "react-jsx"`
+*   Path aliases like `@/*` are configured. Use them for cleaner imports from `src/`.
+    ```typescript
+    import { cloud } from "@/lib/cloudClient"; // if cloudClient.ts is in src/lib
+    ```
+    (Current structure uses relative paths like `../../src/lib/cloudClient.ts`. Using path aliases can be cleaner for deeper nesting).
+
+## Tooling (Recommended)
+
+While not currently enforced by config files in the repo:
+*   **ESLint**: Consider adding ESLint with TypeScript support (`@typescript-eslint/parser`, `@typescript-eslint/eslint-plugin`) to automatically enforce many of these rules.
+*   **Prettier**: Consider adding Prettier for automatic code formatting to ensure consistency across the team.
+*   Integrating these tools can greatly help in maintaining a consistent style with less manual effort.
+
+
+By following these styling guidelines, we aim to create a codebase that is clean, consistent, and easy for all contributors to read and understand.

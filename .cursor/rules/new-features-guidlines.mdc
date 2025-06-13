@@ -1,5 +1,114 @@
 ---
-description:
-globs:
+description: 
+globs: 
 alwaysApply: false
 ---
+# New Features Implementation Guidelines
+
+This document provides guidance on how to implement new features or functionalities within the Bald Brothers Story Engine project. Following a structured approach ensures consistency, maintainability, and quality.
+
+## 1. Planning and Design
+
+*   **Define Requirements**: Clearly understand the feature's goals, user stories (if applicable), and acceptance criteria.
+*   **Impact Analysis**:
+    *   Identify which existing components will be affected (e.g., API, database, AI agents, UI).
+    *   Consider potential side effects on other parts of the system.
+*   **Database Schema**: If the feature requires new data storage or modification of existing tables, design the schema changes for Supabase (PostgreSQL).
+    *   Document new tables or column changes (similar to the `README.md` "Database Setup" section).
+    *   Consider data migrations if updating existing structures with data.
+*   **API Design**: If the feature exposes new API endpoints:
+    *   Define routes, HTTP methods, request/response formats (JSON).
+    *   Determine authentication and authorization requirements (see `api-auth-guidelines.md`).
+*   **Agent Interaction**: If the feature involves AI agents (`ChapterAgent` or new agents):
+    *   Define new tools or prompts.
+    *   Consider how it interacts with memory (Bootoshi Cloud).
+
+## 2. Development Process
+
+*   **Branching**: Create a new feature branch from the main development branch (e.g., `main` or `develop`).
+    ```bash
+    git checkout main
+    git pull
+    git checkout -b feature/my-new-feature
+    ```
+*   **Environment Variables**:
+    *   If new configuration (API keys, settings) is needed, add them to `.env.example` with clear descriptions.
+    *   Update your local `.env` file.
+    *   Ensure the server (`server.ts`) checks for any new *required* environment variables on startup.
+*   **Directory Structure**: Place new files in the appropriate directories as per `project-strucutre-guidlines.mdc`.
+    *   API routes in `server/routes/`.
+    *   Scheduled tasks in `server/sched/`.
+    *   AI agent logic in `src/agents/`.
+    *   Utility functions/libraries in `src/lib/`.
+    *   React components in `src/components/`.
+*   **Coding Standards**:
+    *   Follow `styling-guidelines.mdc` and `commenting-guidlines.md`.
+    *   Write clear, modular, and maintainable TypeScript code.
+    *   Use `async/await` for asynchronous operations.
+    *   Implement robust error handling using `try...catch` blocks.
+*   **Database Interaction**:
+    *   Use the Supabase client for database operations (see `essential-hook-guidlines.mdc`).
+    *   Validate input data before writing to the database.
+*   **API Endpoint Implementation (Express.js)**:
+    *   Create new router files in `server/routes/` or add to existing ones.
+    *   Register routers in `server.ts`.
+    *   Implement authentication using the `authenticateAPI` middleware if needed.
+    *   Validate request payloads.
+*   **AI Agent Development**:
+    *   If modifying `ChapterAgent` or creating a new `FeatherAgent`:
+        *   Define clear system prompts and tool descriptions.
+        *   Test agent behavior and tool usage.
+        *   Interact with Bootoshi Cloud (`cloud` client) for memory.
+*   **Logging**: Implement comprehensive logging as per `logging-guidelines.mdc`. Log key events, errors, and important data points.
+*   **Security**:
+    *   Sanitize inputs to prevent injection attacks (SQL injection, XSS). Supabase client helps with SQLi for parameterized queries.
+    *   Apply authentication/authorization correctly.
+    *   Be mindful of data exposure in API responses.
+
+## 3. Testing
+
+*   **Unit/Integration Tests**: While the project currently has minimal formal tests (`npm run test:agents`), strive to write tests for new, complex logic.
+    *   For agents, the `test:agents` script can be adapted or extended.
+    *   Consider libraries like Jest or Vitest for more comprehensive testing if the project scales.
+*   **Manual Testing**:
+    *   Thoroughly test the new feature locally.
+    *   Use tools like `curl`, Postman, or Insomnia to test new API endpoints.
+    *   Check database entries in Supabase.
+    *   Verify log output.
+    *   Test edge cases and error conditions.
+
+## 4. Documentation
+
+*   **README.md**:
+    *   Update the "API Endpoints" section if new public endpoints are added.
+    *   Update the "Database Setup" section if schema changes were made.
+    *   Add information about the new feature if it's user-facing or significantly changes project behavior.
+*   **Code Comments**: Ensure code is well-commented as per `commenting-guidlines.md`.
+*   **Other Guidelines**: If the feature impacts areas covered by other guideline documents (e.g., authentication, logging), ensure it aligns with them.
+
+## 5. Code Review and Merging
+
+*   **Commit Often**: Make small, logical commits with clear messages.
+*   **Pull Request (PR)**:
+    *   Push your feature branch to the remote repository.
+    *   Create a Pull Request against the main development branch.
+    *   Provide a clear description of the feature, changes made, and how to test it.
+    *   Link to any relevant issues.
+*   **Review**: Have another developer review the PR for correctness, adherence to guidelines, and potential issues.
+*   **Merge**: Once approved and any CI checks pass, merge the PR.
+
+## Example: Adding a New "Events" Feature
+
+1.  **Plan**: Feature to track special world events. Requires a new `events` table in Supabase and an API endpoint `POST /api/events` to create events.
+2.  **Develop**:
+    *   Add `events` table schema to `README.md` and create it in Supabase.
+    *   Create `server/routes/events.ts` with the `POST /api/events` handler.
+        *   Implement validation, Supabase insertion, logging.
+    *   Add authentication to the new endpoint.
+    *   Register the `eventsRouter` in `server.ts`.
+3.  **Test**: Use `curl` to post new events, check Supabase, check logs.
+4.  **Document**: Update `README.md` API list.
+5.  **PR**: Submit PR for review.
+
+
+By following these guidelines, new features can be integrated smoothly and contribute to a robust and well-documented Bald Brothers Story Engine.

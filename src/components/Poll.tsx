@@ -23,11 +23,29 @@ export function Poll() {
   const [loading, setLoading] = useState<boolean>(true);
   const [voting, setVoting] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
+  const [results, setResults] = useState<{ option: string; count: number }[] | null>(null);
 
   // Fetch the current open poll
   useEffect(() => {
     fetchOpenPoll();
   }, []);
+
+  // Fetch poll results after voting or poll expiry
+  useEffect(() => {
+    if ((hasVoted || (poll && new Date(poll.closes_at) < new Date())) && poll) {
+      fetch(`/polls/${poll.id}/results`)
+        .then(r => r.json())
+        .then((data: unknown) => {
+          // Type guard for results
+          if (data && typeof data === 'object' && 'results' in data && Array.isArray((data as any).results)) {
+            setResults((data as { results: { option: string; count: number }[] }).results);
+          } else {
+            setResults(null);
+          }
+        })
+        .catch(() => setResults(null));
+    }
+  }, [hasVoted, poll]);
 
   const fetchOpenPoll = async () => {
     try {
@@ -69,6 +87,12 @@ export function Poll() {
       }
 
       setHasVoted(true);
+      // Immediately fetch results after voting
+      const resultsResponse = await fetch(`/polls/${poll.id}/results`);
+      const resultsData = await resultsResponse.json();
+      if (resultsData && resultsData.results) {
+        setResults(resultsData.results);
+      }
       setError(null);
     } catch (err) {
       setError('Failed to submit vote');
@@ -112,12 +136,27 @@ export function Poll() {
   if (hasVoted || isExpired) {
     return (
       <div className="poll-container">
-        <h2>Poll</h2>
+        <h2>Poll Results</h2>
         <div className="poll-question">{poll.question}</div>
         <div className="poll-status">
           {hasVoted ? "Thanks for voting! " : ""}
           {isExpired ? "This poll has ended." : "Poll is still active."}
         </div>
+        {results && (
+          <div className="poll-results">
+            <div className="result-bar">
+              <div className="yes-bar" style={{ width: `${(results[0].count / (results[0].count + results[1].count)) * 100}%` }}>
+                Yes: {results[0].count} votes
+              </div>
+              <div className="no-bar" style={{ width: `${(results[1].count / (results[0].count + results[1].count)) * 100}%` }}>
+                No: {results[1].count} votes
+              </div>
+            </div>
+            <div className="total-votes">
+              Total votes: {results[0].count + results[1].count}
+            </div>
+          </div>
+        )}
         {!isExpired && (
           <div className="poll-info">
             Closes: {new Date(poll.closes_at).toLocaleString()}

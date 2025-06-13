@@ -9,9 +9,11 @@ export const ChapterAgent = new FeatherAgent({
 Guidelines:
 - Write in a dramatic, engaging narrative style
 - Maintain consistency with previous chapters and established lore
-- Each chapter should be 400+ characters and advance the story meaningfully
+- When "yes" is selected in a poll, write a longer chapter (4-5 paragraphs, 800+ characters)
+- When "no" is selected, write a shorter chapter (2-3 paragraphs, 400+ characters)
 - Include vivid descriptions, character development, and plot progression
 - End chapters on compelling notes that encourage readers to continue
+- Consider the poll results when deciding the story direction
 
 You have access to tools to retrieve recent story context and save new chapters.`,
   tools: [
@@ -29,6 +31,27 @@ You have access to tools to retrieve recent story context and save new chapters.
       execute: async () => {
         log.info("Fetching last 3 memories");
         return await cloud("query", { agent_id: "chapter", run_id: "canon", limit: 3 });
+      }
+    },
+    {
+      type: "function",
+      function: {
+        name: "get_poll_results",
+        description: "Get the results of the most recent poll",
+        parameters: {
+          type: "object",
+          properties: {},
+          required: []
+        }
+      },
+      execute: async () => {
+        log.info("Fetching recent poll results");
+        return await cloud("query", { 
+          agent_id: "poll", 
+          run_id: "weekly", 
+          limit: 1,
+          filter: { type: "poll_result" }
+        });
       }
     },
     {

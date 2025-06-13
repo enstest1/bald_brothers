@@ -1,5 +1,122 @@
 ---
-description:
-globs:
+description: 
+globs: 
 alwaysApply: false
 ---
+
+---
+### `logging-guidelines.mdc`
+```markdown
+# Logging Guidelines
+
+This document outlines the standards and practices for logging within the Bald Brothers Story Engine project. Consistent and effective logging is crucial for debugging, monitoring, and understanding application behavior.
+
+## 1. Logging Library: Pino
+
+This project uses **Pino** for logging. Pino is a high-performance, low-overhead logger that outputs structured JSON logs by default.
+
+*   **Initialization**:
+    ```typescript
+    const log = require("pino")();
+    // Or for ES Modules:
+    // import pino from 'pino';
+    // const log = pino();
+    ```
+    A logger instance is typically created at the beginning of each module/file where logging is needed.
+
+## 2. Log Levels
+
+Use appropriate log levels to categorize messages:
+
+*   **`log.fatal()`**: For severe errors that will cause the application to terminate. (Use sparingly)
+*   **`log.error()`**: For runtime errors or unexpected conditions that prevent a specific operation from completing successfully. Always include an Error object as the first argument if available.
+    ```typescript
+    try {
+      // ... some operation ...
+    } catch (error) {
+      log.error(error, "Failed to process request for user %s", userId);
+    }
+    ```
+*   **`log.warn()`**: For potentially harmful situations or unexpected, non-critical issues. The application can still continue.
+    ```typescript
+    log.warn("API_TOKEN not configured - API endpoints are unprotected");
+    log.warn("Poll duplicate client_id %s", client_id);
+    ```
+*   **`log.info()`**: For general operational messages, indicating significant events or progress. This is the standard level for most routine logging.
+    ```typescript
+    log.info("Bald Brothers Story Engine server started on port %d", PORT);
+    log.info("Chapter generated %d chars", output.length);
+    log.info("Processing vote for poll %s, client %s, choice %d", pollId, clientId, choice);
+    ```
+*   **`log.debug()`**: For detailed information useful for debugging. (Pino's default level is 'info', so debug logs might not appear unless level is changed).
+*   **`log.trace()`**: For very fine-grained information, typically more verbose than debug.
+
+## 3. Log Message Content
+
+*   **Be Descriptive**: Messages should be clear and provide enough context to understand what happened.
+*   **Structured Data**: Pino excels at structured logging.
+    *   Use `printf`-style string substitution for dynamic values: `%s` for strings, `%d` for numbers, `%o` or `%O` for objects.
+        ```typescript
+        log.info("Fetched %d memories for agent %s", list.length, agentId);
+        log.info("Cloud request to path: %s with data: %o", path, data);
+        ```
+    *   Pass an object as the first argument (after an optional Error object for `log.error`) to include custom fields in the JSON output.
+        ```typescript
+        log.info({ pollId: poll.id, question: poll.question, userId: client_id }, "Vote cast successfully");
+        ```
+*   **Include Context**: Where relevant, include identifiers like user IDs, request IDs, poll IDs, etc., to help trace operations.
+*   **Avoid Sensitive Information**: Do **not** log raw passwords, API keys, or other highly sensitive personal data. If configuration values are logged (e.g., on startup), ensure sensitive parts are masked or omitted. The `.env.example` shows `CLOUD_PASSWORD` which should never be logged.
+*   **Error Logging**: When logging errors, always include the error object itself. Pino will automatically serialize its properties.
+    ```typescript
+    log.error(err, "Bootoshi Cloud failure during add operation");
+    ```
+
+## 4. Where to Log
+
+*   **Application Lifecycle**: Server start, stop, major initializations.
+    ```typescript
+    log.info("Bald Brothers Story Engine server started on port %d", PORT);
+    log.info("Environment: %s", process.env.NODE_ENV || "development");
+    log.info("Poll scheduler started...");
+    ```
+*   **API Requests**: Entry and exit of important API handlers, especially for `POST` or mutating requests. Include key request parameters (sanitized if necessary).
+    ```typescript
+    log.info("Starting chapter generation for arc %s", req.params.arcId);
+    log.info("Vote recorded successfully for client %s", clientId);
+    ```
+*   **External Service Interactions**: Calls to Bootoshi Cloud, Supabase, AI models. Log the attempt, success, or failure, and key parameters/results.
+    ```typescript
+    log.info("cloud %s %o", path, data); // src/lib/cloudClient.ts
+    log.info("Chapter successfully saved to database");
+    log.error(error, "Failed to save chapter to Supabase");
+    ```
+*   **Scheduled Tasks**: Start and end of scheduled jobs, and any significant outcomes or errors.
+    ```typescript
+    log.info("Starting scheduled poll closure and tally");
+    log.info("Poll %s closed. Results: %o", poll.id, result.results);
+    ```
+*   **Business Logic**: Key decision points or state changes in the application logic.
+*   **Security Events**: Unauthorized access attempts, authentication failures (be careful not to log too much detail that could aid an attacker).
+    ```typescript
+    log.warn("Unauthorized API access attempt from %s", req.ip);
+    ```
+
+## 5. Log Output
+
+*   Pino outputs JSON logs to `stdout`. This is ideal for containerized environments and log management systems (e.g., Datadog, ELK stack), which can parse and index JSON.
+*   Example JSON log entry (simplified):
+    ```json
+    {
+      "level": 30, "time": 1678886400000, "pid": 123, "hostname": "my-server",
+      "msg": "Server started on port 3000"
+    }
+    ```
+    (Actual output will vary based on Pino configuration and logged data.)
+
+## 6. Performance Considerations
+
+*   Pino is designed for low overhead. However, avoid excessive logging in hot paths (frequently executed code loops) unless at `debug` or `trace` levels that can be disabled in production.
+*   Be mindful of the size of objects logged with `%o` or as custom fields.
+
+
+By adhering to these guidelines, logs will become a valuable asset for maintaining and operating the Bald Brothers Story Engine.

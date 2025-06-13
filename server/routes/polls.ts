@@ -1,6 +1,8 @@
 import express from "express";
 import { createClient } from "@supabase/supabase-js";
 import { v4 as uuidv4 } from "uuid";
+import { cloud } from "../../src/lib/cloudClient";
+import { ChapterAgent } from "../../src/agents/chapterAgent";
 const log = require("pino")();
 
 const router = express.Router();
@@ -57,12 +59,7 @@ router.post("/:id/vote", async (req, res) => {
 
     log.info("Processing vote for poll %s, client %s, choice %d", pollId, clientId, choice);
 
-    // Validate choice (0=yes, 1=no)
-    if (choice !== 0 && choice !== 1) {
-      return res.status(400).json({ error: "Invalid choice. Must be 0 (yes) or 1 (no)" });
-    }
-
-    // Check if poll exists and is still open
+    // Fetch poll to get options and check if open
     const { data: poll, error: pollError } = await supabase
       .from("polls")
       .select("*")
@@ -76,6 +73,12 @@ router.post("/:id/vote", async (req, res) => {
 
     if (new Date(poll.closes_at) < new Date()) {
       return res.status(400).json({ error: "Poll is closed" });
+    }
+
+    // Validate choice is a valid option index
+    if (!Array.isArray(poll.options) || typeof choice !== 'number' || choice < 0 || choice >= poll.options.length) {
+      log.warn("Invalid choice %d for poll %s", choice, pollId);
+      return res.status(400).json({ error: `Invalid choice. Must be an integer between 0 and ${poll.options.length - 1}` });
     }
 
     // Insert or update vote (upsert)
@@ -124,22 +127,25 @@ router.post("/create", async (req, res) => {
     
     log.info("Creating new poll: %s", question);
 
+    // Set poll duration based on environment
+    const pollDuration = process.env.NODE_ENV === 'production' 
+      ? 24 * 60 * 60 * 1000  // 24 hours in production
+      : 10 * 1000;           // 10 seconds in development
+
     const { data, error } = await supabase
       .from("polls")
       .insert({
         question,
         options: ["yes", "no"],
-        closes_at: closes_at || new Date(Date.now() + 7 * 24 * 60 * 60 * 1000) // Default: 1 week from now
+        closes_at: closes_at || new Date(Date.now() + pollDuration)
       })
       .select()
       .single();
-
     if (error) {
       log.error(error, "Failed to create poll");
       return res.status(500).json({ error: "Failed to create poll" });
     }
-
-    log.info("Poll created with ID %s", data.id);
+    log.info("Poll created with ID %s and options %o", data.id, ["yes", "no"]);
     res.json({ poll: data });
   } catch (error) {
     log.error(error, "Error creating poll");
@@ -205,11 +211,177 @@ router.post("/close-current", async (req, res) => {
     };
 
     log.info("Poll %s closed. Results: %o", poll.id, result.results);
+
+    // Store poll results in Bootoshi Cloud for agent context
+    try {
+      await cloud("add", {
+        agent_id: "poll",
+        run_id: "weekly",
+        memories: `Poll closed: "${poll.question}". Results: ${yesVotes} yes, ${noVotes} no (${totalVotes} total votes). Winner: ${result.results.winner}`,
+        store_mode: "vector",
+        metadata: { 
+          ...result,
+          ts: Date.now(),
+          type: "poll_result"
+        },
+        skip_extraction: true
+      });
+      log.info("Poll results saved to Bootoshi Cloud");
+
+      // Trigger chapter generation after poll closes
+      try {
+        const chapterResponse = await fetch(`${process.env.API_URL}/api/worlds/1/arcs/1/progress`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${process.env.API_TOKEN}`
+          }
+        });
+
+        if (!chapterResponse.ok) {
+          throw new Error(`Chapter generation failed: ${chapterResponse.statusText}`);
+        }
+
+        log.info("Chapter generation triggered successfully after poll closure");
+      } catch (chapterError) {
+        log.error(chapterError, "Failed to trigger chapter generation after poll closure");
+      }
+    } catch (cloudError) {
+      log.error(cloudError, "Failed to save poll results to Bootoshi Cloud");
+    }
+
+    // Create new poll for next week
+    try {
+      // Get the latest chapter to generate contextual options
+      const { data: latestChapter, error: chapterError } = await supabase
+        .from("beats")
+        .select("*")
+        .order("authored_at", { ascending: false })
+        .limit(1)
+        .single();
+
+      let pollOptions;
+      let pollQuestion;
+
+      if (chapterError || !latestChapter) {
+        // First poll - use yes/no
+        pollQuestion = "Should the Bald Brothers begin their quest?";
+        pollOptions = ["yes", "no"];
+      } else {
+        // Generate two different story options based on the latest chapter
+        const options = await generateStoryOptions(latestChapter.body);
+        pollQuestion = options.question;
+        pollOptions = options.choices;
+      }
+
+      const { data: newPoll, error: newPollError } = await supabase
+        .from("polls")
+        .insert({
+          question: pollQuestion,
+          options: pollOptions,
+          closes_at: new Date(Date.now() + (process.env.NODE_ENV === 'production' ? 24 * 60 * 60 * 1000 : 60 * 1000))
+        })
+        .select()
+        .single();
+
+      if (newPollError) {
+        throw newPollError;
+      }
+
+      log.info("New poll created with ID %s and options %o", newPoll.id, pollOptions);
+    } catch (newPollError) {
+      log.error(newPollError, "Failed to create new poll");
+    }
+
     res.json(result);
   } catch (error) {
     log.error(error, "Error closing poll");
     res.status(500).json({ error: "Internal server error" });
   }
 });
+
+// Get poll results (vote counts per option)
+router.get("/:id/results", async (req, res) => {
+  /**
+   * @api {get} /polls/:id/results Get poll results (vote counts per option)
+   * @apiDescription Returns the number of votes for each option in the poll.
+   * @apiParam {String} id Poll ID
+   * @apiSuccess {Object[]} results Array of { option, count }
+   * @apiError (500) InternalServerError Failed to fetch poll results
+   */
+  try {
+    const pollId = req.params.id;
+    log.info("Fetching results for poll %s", pollId);
+
+    // Fetch poll to get options
+    const { data: poll, error: pollError } = await supabase
+      .from("polls")
+      .select("options")
+      .eq("id", pollId)
+      .single();
+    if (pollError || !poll) {
+      log.error(pollError, "Poll not found: %s", pollId);
+      return res.status(404).json({ error: "Poll not found" });
+    }
+    const options = poll.options;
+
+    // Fetch all votes for this poll
+    const { data: votes, error: voteError } = await supabase
+      .from("votes")
+      .select("choice")
+      .eq("poll_id", pollId);
+    if (voteError) {
+      log.error(voteError, "Failed to fetch votes for poll %s", pollId);
+      return res.status(500).json({ error: "Failed to fetch votes" });
+    }
+
+    // Count votes for each option
+    const counts = options.map((opt: string, idx: number) => ({
+      option: opt,
+      count: votes.filter((v: { choice: number }) => v.choice === idx).length
+    })); // Map each option to its vote count
+    log.info("Poll %s results: %o", pollId, counts);
+    res.json({ results: counts });
+  } catch (error) {
+    log.error(error, "Error fetching poll results");
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// Helper function to generate story options
+async function generateStoryOptions(chapterContent: string) {
+  try {
+    // Use the ChapterAgent to generate two different story options
+    const result = await ChapterAgent.run(`Based on this chapter:
+    "${chapterContent}"
+    
+    Generate two different story options for the next chapter. One should be a darker turn, and one should be more focused on the Bald Brothers' journey. Format the response as:
+    {
+      "question": "What path should the Bald Brothers take?",
+      "choices": ["Option 1", "Option 2"]
+    }`);
+
+    if (!result.success) {
+      throw new Error("Failed to generate story options");
+    }
+
+    // Parse the response
+    const options = JSON.parse(result.output as string);
+    return {
+      question: options.question,
+      choices: options.choices
+    };
+  } catch (error) {
+    log.error(error, "Failed to generate story options");
+    // Fallback options if generation fails
+    return {
+      question: "What path should the Bald Brothers take?",
+      choices: [
+        "Seek the ancient bald scrolls in the dark temple",
+        "Train with the wise bald masters in the mountains"
+      ]
+    };
+  }
+}
 
 export default router;

@@ -1,0 +1,63 @@
+---
+description: 
+globs: 
+alwaysApply: false
+---
+Used for longer explanations that span multiple lines. Can also be used for temporarily commenting out blocks of code.
+/*
+  This function handles voting on a poll.
+  It performs several checks:
+  1. Validates the choice (must be 0 or 1).
+  2. Ensures the poll exists and is still open.
+  3. Uses a client_id (from a cookie) to prevent duplicate votes from the same client.
+  4. Upserts the vote into the database.
+*/
+router.post("/:id/vote", async (req, res) => {
+  // ...
+});
+Use code with caution.
+TypeScript
+3. JSDoc / TSDoc Style Comments (/** ... */)
+While not extensively used in the current codebase for all functions, this style is highly recommended for:
+Functions, methods, and classes, especially those part of public APIs or complex internal logic.
+Describing parameters (@param), return values (@returns), and purpose.
+Type definitions and interfaces.
+Example (Recommended Practice):
+/**
+ * Retrieves the currently open poll.
+ * An open poll is one whose `closes_at` time is in the future.
+ * @async
+ * @param {express.Request} req - The Express request object.
+ * @param {express.Response} res - The Express response object.
+ * @returns {Promise<void>} Sends a JSON response with the poll or an error.
+ */
+router.get("/open", async (req, res) => {
+  // ...
+});
+
+/**
+ * Interface representing a Poll object.
+ */
+interface Poll {
+  id: string; // UUID of the poll
+  question: string; // The poll question
+  options: string[]; // Array of poll options (e.g., ['yes', 'no'])
+  closes_at: string; // ISO string timestamp when the poll closes
+}
+Use code with caution.
+TypeScript
+4. TODO Comments
+Use // TODO: or // FIXME: to mark areas of code that require future attention.
+// TODO: For planned features or improvements.
+// FIXME: For known bugs or issues that need fixing.
+Include a brief description of the task or problem.
+// TODO: Create new poll for next week
+// This could be enhanced to automatically generate a new poll question
+// based on the story context or current events
+Use code with caution.
+TypeScript
+Specific Guidelines
+File Headers: Consider adding a brief comment at the top of new files explaining their overall purpose or responsibility, especially for modules with significant logic. (The current Repomix summary serves a similar purpose at a higher level).
+Complex Logic: Any algorithm or business rule that isn't immediately obvious should be commented.
+Workarounds/Hacks: If a piece of code is a workaround for a bug or limitation in a library or system, explain why it's necessary.
+Configuration: Comments in configuration files (like .env.example) are crucial for explaining what each variable does.

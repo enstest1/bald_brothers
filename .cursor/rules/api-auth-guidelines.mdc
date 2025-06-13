@@ -1,0 +1,119 @@
+---
+description: 
+globs: 
+alwaysApply: false
+---
+# API Authentication Guidelines
+
+This document outlines the authentication standards and practices for this project's API endpoints, particularly those interacting with external services or requiring protection.
+
+## Overview
+
+The primary method of API authentication is **Bearer Token Authentication**. This is used to protect sensitive endpoints and ensure that only authorized clients (like GitHub Actions or other backend services) can trigger certain operations.
+
+## Authentication Mechanism
+
+1.  **Token Type**: Bearer Token.
+2.  **Token Transmission**:
+    *   The token should be included in the `Authorization` HTTP header with the `Bearer` prefix.
+        ```
+        Authorization: Bearer YOUR_API_TOKEN
+        ```
+    *   Alternatively, the token can be passed in the `x-api-token` HTTP header.
+        ```
+        x-api-token: YOUR_API_TOKEN
+        ```
+3.  **Server-Side Verification**:
+    *   The `server.ts` file implements an `authenticateAPI` middleware.
+    *   This middleware checks for the presence of the token in the `Authorization` or `x-api-token` header.
+    *   It compares the provided token against the `API_TOKEN` environment variable.
+
+## Configuration
+
+*   The master API token is stored in the `API_TOKEN` environment variable.
+    ```env
+    # .env.example
+    API_TOKEN=your_secure_api_token_here
+    ```
+*   It is crucial to set a strong, unique token in your production environment and `.env` file.
+*   If `API_TOKEN` is not configured, a warning is logged, and API endpoints will be unprotected. This is suitable only for local development if intentionally configured.
+
+## Protected Endpoints
+
+The `authenticateAPI` middleware is applied to all routes under `/api/*`. This currently includes:
+
+*   `POST /api/worlds/:id/arcs/:arcId/progress` (Chapter generation)
+
+Additionally, specific poll management endpoints that modify data are implicitly protected if they are accessed via paths that would trigger the `authenticateAPI` middleware (e.g. if they were under `/api/polls/*`). However, the current setup for poll creation and closing seems to be:
+
+*   `POST /polls/create`
+*   `POST /polls/close-current`
+
+These poll endpoints are **not** currently protected by the `authenticateAPI` middleware as it's scoped to `/api/*`. However, the GitHub Actions (`daily-chapter.yml`, `weekly-close.yml`) *do* send an `Authorization: Bearer ${{ secrets.API_TOKEN }}` header when calling these endpoints (e.g., `${{ secrets.API_URL }}/polls/close-current`). The `server.ts` `authenticateAPI` middleware explicitly *skips* authentication for `GET` requests to `/polls/*`. This implies `POST` requests to `/polls/*` *should* be authenticated if the middleware were applied to them directly, or if they were nested under `/api`.
+
+**Recommendation**: For consistency and security, critical `POST` endpoints like `/polls/create` and `/polls/close-current` should also be explicitly covered by the `authenticateAPI` middleware, perhaps by moving them under the `/api` prefix (e.g., `/api/polls/create`). The current GitHub Actions *are* sending the token, which is good practice.
+
+## Public Endpoints
+
+The following endpoints are intentionally public or have specific authentication behaviors:
+
+*   `GET /polls/open`: Publicly accessible to allow clients to fetch the current poll. The `authenticateAPI` middleware explicitly bypasses authentication for `GET` requests to paths starting with `/polls`.
+*   `POST /polls/:id/vote`: This endpoint uses a cookie-based `client_id` for user identification to prevent duplicate voting, not token authentication for the action itself.
+*   `GET /health`: Public health check endpoint.
+*   `GET /`: Public API documentation endpoint.
+
+## Usage in GitHub Actions
+
+GitHub Actions workflows (e.g., `daily-chapter.yml`, `weekly-close.yml`) use the `API_TOKEN` stored as a repository secret (`secrets.API_TOKEN`) to authenticate their `curl` requests to the API.
+
+Example from `.github/workflows/daily-chapter.yml`:
+```yaml
+response=$(curl -s -w "%{http_code}" -X POST "${{ secrets.API_URL }}/worlds/1/arcs/1/progress" \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer ${{ secrets.API_TOKEN }}" \
+  -d '{}')
+Use code with caution.
+Markdown
+Security Best Practices
+Always use HTTPS for API communication to protect the token in transit.
+Ensure API_TOKEN is kept confidential and stored securely (e.g., as environment variables or secrets in deployment platforms).
+Regenerate the API_TOKEN if it's suspected to be compromised.
+Limit the scope of permissions for API tokens if more granular control is needed in the future (not currently implemented, but a general best practice).
+---
+### `commenting-guidlines.md`
+```markdown
+# Code Commenting Guidelines
+
+This document defines the standards for commenting code within the Bald Brothers Story Engine project. Effective commenting improves code readability, maintainability, and collaboration.
+
+## General Principles
+
+1.  **Comment Why, Not What**: Comments should explain the *intent*, *purpose*, or *reasoning* behind a piece of code, especially if it's complex or non-obvious. Avoid comments that merely restate what the code does.
+    *   **Bad**: `// Increment i`
+        `i++;`
+    *   **Good**: `// Ensure poll closure job runs just before midnight UTC`
+        `cron.schedule("59 23 * * 6", async () => { ... });`
+
+2.  **Keep Comments Up-to-Date**: Outdated comments are worse than no comments. If you change the code, ensure any related comments are updated accordingly.
+
+3.  **Write Clear and Concise Comments**: Use simple language. Avoid jargon where possible, or explain it if necessary.
+
+4.  **Avoid Over-Commenting**: Code that is clear and self-documenting often needs fewer comments. Focus on commenting complex sections, important decisions, or workarounds.
+
+## Comment Types and Usage
+
+### 1. Single-Line Comments (`//`)
+
+Used for brief explanations on a single line or at the end of a line of code.
+
+```typescript
+// Middleware to authenticate API requests
+const authenticateAPI = (req: express.Request, res: express.Response, next: express.NextFunction) => {
+  // Skip authentication for GET requests to polls (public viewing)
+  if (req.method === "GET" && req.path.startsWith("/polls")) {
+    return next();
+  }
+  // ...
+};
+
+const PORT = process.env.PORT || 3000; // Default to port 3000 if not specified

@@ -1,5 +1,151 @@
 ---
-description:
-globs:
+description: 
+globs: 
 alwaysApply: false
 ---
+
+---
+### `essential-hook-guidlines.mdc`
+```markdown
+# Essential "Hooks": Accessing Common Resources and Data Management
+
+This document explains how to access common resources and data management instances within this project. While not "hooks" in the sense of frameworks like React, these are common patterns for accessing shared utilities and services.
+
+## 1. Environment Variables
+
+Environment variables are crucial for configuring the application (API keys, URLs, server settings).
+
+*   **Loading**: `dotenv` library is used to load variables from a `.env` file into `process.env`. This is initialized at the start of the application in `server.ts`:
+    ```typescript
+    import "dotenv/config";
+    ```
+*   **Access**: Variables are accessed via `process.env.VARIABLE_NAME`.
+    ```typescript
+    const PORT = process.env.PORT || 3000;
+    const supabaseUrl = process.env.SUPABASE_URL!;
+    const cloudPassword = process.env.CLOUD_PASSWORD;
+    ```
+    Note the use of `!` (non-null assertion operator) for variables expected to be definitely set. Handle potentially missing variables gracefully.
+*   **Definition**: Define new environment variables in `.env.example` with descriptions and add them to your local `.env` file. See `server.ts` for a check on required environment variables at startup.
+
+## 2. Supabase Client
+
+The Supabase client is used for all interactions with the Supabase PostgreSQL database (polls, votes, story beats).
+
+*   **Initialization**: A Supabase client instance is created using `createClient` from `@supabase/supabase-js`.
+    ```typescript
+    import { createClient } from "@supabase/supabase-js";
+
+    const supabase = createClient(
+      process.env.SUPABASE_URL!,
+      process.env.SUPABASE_ANON_KEY!
+    );
+    ```
+*   **Usage**: Typically, a client instance is initialized at the top of files that need database access (e.g., `server/routes/chapters.ts`, `server/routes/polls.ts`, `server/sched/closePoll.ts`).
+    ```typescript
+    // Example: Fetching open polls
+    const { data: polls, error } = await supabase
+      .from("polls")
+      .select("*")
+      .gt("closes_at", new Date().toISOString())
+      .order("closes_at", { ascending: true })
+      .limit(1);
+    ```
+*   **Best Practice**: Ensure `SUPABASE_URL` and `SUPABASE_ANON_KEY` are correctly set in environment variables.
+
+## 3. Bootoshi Cloud Client (`cloud` function)
+
+The `cloud` function is a wrapper for interacting with the Bootoshi Cloud API, used for long-term memory storage and retrieval by AI agents.
+
+*   **Location**: `src/lib/cloudClient.ts`
+*   **Function Signature**:
+    ```typescript
+    export async function cloud(path: string, data: any): Promise<any>
+    ```
+*   **Usage**: Import the `cloud` function and call it with the API path and payload.
+    ```typescript
+    import { cloud } from "../lib/cloudClient"; // Adjust path as needed
+
+    // Example: Adding a memory
+    await cloud("add", {
+      agent_id: "poll",
+      run_id: "weekly",
+      memories: "Poll closed: ...",
+      // ... other parameters
+    });
+
+    // Example: Querying memories
+    const memories = await cloud("query", { agent_id: "chapter", run_id: "canon", limit: 3 });
+    ```
+*   **Configuration**: Relies on `CLOUD_URL` and `CLOUD_PASSWORD` environment variables.
+*   **Error Handling**: The function throws an error if the API request is not successful (`!res.ok`). Ensure to wrap calls in `try...catch` blocks.
+
+## 4. Logger (`pino`)
+
+Structured JSON logging is provided by `pino`.
+
+*   **Initialization**: A logger instance is typically initialized once per file or module.
+    ```typescript
+    const log = require("pino")(); // CommonJS style import seen in project
+    // Or, for ES Modules consistency, if preferred for new files:
+    // import pino from 'pino';
+    // const log = pino();
+    ```
+*   **Usage**: Use standard log levels like `log.info()`, `log.warn()`, `log.error()`.
+    Pino supports `printf`-style string substitution.
+    ```typescript
+    log.info("Server started on port %d", PORT);
+    log.warn("Missing required environment variables: %s", missingVars.join(", "));
+    log.error(error, "Failed to fetch open polls"); // First argument can be an Error object
+    log.info("Retrieved open poll %s", poll.id);
+    log.info("Cloud request: %s, Data: %o", path, data); // %o for objects
+    ```
+*   **Refer to `logging-guidelines.mdc` for more detailed practices.**
+
+## 5. Feather AI Agent
+
+The `ChapterAgent` is an instance of `FeatherAgent` used for AI-powered story generation.
+
+*   **Location**: `src/agents/chapterAgent.ts`
+*   **Definition**:
+    ```typescript
+    import { FeatherAgent } from "feather-ai";
+    // ... configuration ...
+    export const ChapterAgent = new FeatherAgent({ /* ...config... */ });
+    ```
+*   **Usage**: Import the agent and use its methods (e.g., `run`).
+    ```typescript
+    import { ChapterAgent } from "../../src/agents/chapterAgent"; // Adjust path
+
+    // Example: Running the agent
+    const result = await ChapterAgent.run("Generate the next chapter...");
+    if (result.success) {
+      const output = result.output as string;
+      // ...
+    }
+    ```
+*   **Configuration**: The agent's configuration includes the model (e.g., `openai/gpt-4o-mini`), system prompt, and tools (like `get_recent` and `save` which use the `cloud` client). Relies on `OPENROUTER_API_KEY` and potentially `OPENPIPE_API_KEY` environment variables.
+
+## Accessing Express Request/Response Objects
+
+In Express route handlers and middleware, `req` (request) and `res` (response) objects are directly available as parameters. These are used for:
+*   Reading request body: `req.body`
+*   Reading request parameters: `req.params`
+*   Reading request query strings: `req.query`
+*   Reading request headers: `req.headers`
+*   Reading/writing cookies: `req.cookies`, `res.cookie()` (requires `cookie-parser` middleware)
+*   Sending responses: `res.json()`, `res.status()`, `res.send()`
+
+```typescript
+// Example from server/routes/polls.ts
+router.post("/:id/vote", async (req, res) => {
+  const { choice } = req.body; // Access request body
+  const pollId = req.params.id; // Access route parameter
+  let clientId = req.cookies?.client_id; // Access cookies
+
+  // ... logic ...
+
+  res.cookie("client_id", clientId, { maxAge: /*...*/ }); // Set cookie
+  res.json({ success: true, clientId }); // Send JSON response
+
+});

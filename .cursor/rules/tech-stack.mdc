@@ -1,5 +1,99 @@
 ---
-description:
-globs:
+description: 
+globs: 
 alwaysApply: false
 ---
+# Tech Stack Overview
+
+This document provides an overview of the core technologies, libraries, and frameworks used in the Bald Brothers Story Engine project. Understanding the tech stack is essential for development, troubleshooting, and generating compatible code.
+
+## Core Backend
+
+*   **Runtime Environment**: **Node.js**
+    *   The application is built to run on the Node.js JavaScript runtime. Version compatibility should be checked against `package.json` (e.g., `@types/node` suggests modern versions).
+*   **Web Framework**: **Express.js**
+    *   Used for building the API server, handling HTTP requests, routing, and middleware.
+    *   (`express`, `@types/express`)
+*   **Language**: **TypeScript**
+    *   The entire backend and most of the frontend logic is written in TypeScript, providing static typing over JavaScript.
+    *   (`typescript`, `ts-node` for development, `tsc` for compilation)
+
+## Database
+
+*   **Primary Database**: **Supabase (PostgreSQL)**
+    *   Supabase is used as the backend-as-a-service platform, providing a PostgreSQL database, authentication, and auto-generated APIs (though this project primarily uses its database via direct client access).
+    *   Tables: `polls`, `votes`, `beats`.
+    *   Client Library: `@supabase/supabase-js`
+
+## Artificial Intelligence & Story Generation
+
+*   **AI Agent Framework**: **Feather AI**
+    *   A library for building and running AI agents with tools and prompts.
+    *   (`feather-ai` - installed from a GitHub repository: `github:kingbootoshi/feather`)
+*   **AI Model Providers**:
+    *   **OpenRouter**: Used as an AI model router, providing access to various large language models (LLMs).
+        *   Configuration: `OPENROUTER_API_KEY`
+        *   Library: `@openrouter/ai-sdk-provider`
+    *   **OpenAI**: Models like GPT-4o-mini are accessed, likely via OpenRouter. The `openai` package is also a dependency, potentially for direct use or as a sub-dependency.
+        *   Library: `openai`
+*   **Long-Term Memory / Vector Store**: **Bootoshi Cloud (mem0)**
+    *   An external service used for persisting and retrieving narrative context, likely functioning as a vector database for semantic search over story elements.
+    *   Accessed via a custom client: `src/lib/cloudClient.ts`
+    *   Configuration: `CLOUD_URL`, `CLOUD_PASSWORD`
+
+## Scheduling & Automation
+
+*   **In-Process Scheduling**: **node-cron**
+    *   Used for scheduling tasks within the running Node.js application (e.g., closing polls).
+    *   (`node-cron`)
+*   **External Automation**: **GitHub Actions**
+    *   Used for CI/CD and scheduled tasks that run independently of the server process (e.g., daily chapter generation, weekly poll closing via API calls).
+    *   Workflows in `.github/workflows/`.
+
+## Frontend (Minimal)
+
+*   **UI Library**: **React**
+    *   Used for a specific UI component (`Poll.tsx`) to display and interact with polls.
+    *   (`react`, `@types/react`)
+    *   JSX is enabled in `tsconfig.json`.
+
+## Logging
+
+*   **Library**: **Pino**
+    *   Used for structured JSON logging, providing high performance and detailed log output.
+    *   (`pino`)
+
+## Utility Libraries
+
+*   **Environment Variables**: **dotenv**
+    *   Loads environment variables from a `.env` file into `process.env`.
+    *   (`dotenv`)
+*   **HTTP Client**: **node-fetch**
+    *   A light-weight module that brings `window.fetch` to Node.js. Used in `src/lib/cloudClient.ts`.
+    *   (`node-fetch`)
+*   **Cookie Parsing**: **cookie-parser**
+    *   Express middleware for parsing `Cookie` header and populating `req.cookies`.
+    *   (`cookie-parser`, `@types/cookie-parser`)
+*   **UUID Generation**: **uuid**
+    *   Used for generating universally unique identifiers (e.g., for `client_id` in polls).
+    *   (`uuid`, `@types/uuid`)
+
+## Development & Build Tools
+
+*   **Package Manager**: **npm** (implied by `package.json` and `package-lock.json`)
+*   **TypeScript Compiler**: **tsc** (from `typescript` package)
+    *   Used to compile TypeScript code to JavaScript (output to `dist/` directory).
+
+## Key Environment Variables (Configuration)
+
+The application relies heavily on environment variables for configuration. Key ones include:
+*   `CLOUD_URL`, `CLOUD_PASSWORD` (Bootoshi Cloud)
+*   `SUPABASE_URL`, `SUPABASE_ANON_KEY` (Supabase)
+*   `OPENROUTER_API_KEY` (OpenRouter)
+*   `OPENPIPE_API_KEY` (Optional, OpenPipe for data collection)
+*   `PORT` (Server port)
+*   `NODE_ENV` (Node environment: development, production)
+*   `API_TOKEN` (Security token for API access)
+
+
+A solid understanding of these technologies is key to contributing effectively to the Bald Brothers Story Engine.

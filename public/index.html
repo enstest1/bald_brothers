@@ -77,6 +77,46 @@
       transition: background 0.2s;
     }
     .poll button:hover { background: #fff200; }
+    /* Poll Results Styling */
+    .poll-results {
+      margin: 1rem 0;
+      padding: 1rem;
+      background: #222c;
+      border-radius: 8px;
+    }
+    
+    .result-bar {
+      display: flex;
+      height: 30px;
+      margin: 1rem 0;
+      border-radius: 4px;
+      overflow: hidden;
+    }
+    
+    .yes-bar, .no-bar {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: #000;
+      font-weight: bold;
+      transition: width 0.3s ease;
+      min-width: 60px;
+    }
+    
+    .yes-bar {
+      background: #4CAF50;
+    }
+    
+    .no-bar {
+      background: #f44336;
+    }
+    
+    .total-votes {
+      text-align: center;
+      margin-top: 0.5rem;
+      font-size: 0.9rem;
+      color: #888;
+    }
     /* Story area */
     .story {
       background: #222c;
@@ -130,7 +170,7 @@
   </div>
   <script>
     // Countdown logic
-    let countdownSeconds = 120; // 2 minutes for testing
+    let countdownSeconds = 10; // 10 seconds for quick testing
     let countdownInterval;
     const countdownDiv = document.getElementById('countdown');
     const storyHeading = document.getElementById('story-heading');
@@ -162,30 +202,56 @@
     countdownInterval = setInterval(updateCountdown, 1000);
     updateCountdown();
 
-    // Load poll (now called after chapter is posted)
+    // --- POLL LOGIC ENHANCEMENT ---
+    let pollData = null;
+    let pollCountdownInterval = null;
+
     function loadPoll() {
       fetch('/polls/open')
         .then(r => r.json())
         .then(data => {
+          pollData = data.poll;
           const pollDiv = document.getElementById('current-poll');
-          if (data.poll) {
-            // Support multiple options
+          if (pollData) {
+            // Show poll with countdown
             let optionsHtml = '';
-            data.poll.options.forEach((opt, idx) => {
+            pollData.options.forEach((opt, idx) => {
               optionsHtml += `<button onclick="vote(${idx})">${opt}</button> `;
             });
             pollDiv.innerHTML = `
               <h2>Current Poll</h2>
-              <p><strong>${data.poll.question}</strong></p>
+              <p><strong>${pollData.question}</strong></p>
               ${optionsHtml}
-              <p><small>Closes: ${new Date(data.poll.closes_at).toLocaleString()}</small></p>
+              <div id="poll-timer"></div>
+              <p><small>Closes: ${new Date(pollData.closes_at).toLocaleString()}</small></p>
             `;
+            startPollCountdown();
           } else {
             pollDiv.innerHTML = '<h2>No active poll</h2>';
           }
         });
     }
-    // Vote function
+
+    function startPollCountdown() {
+      clearInterval(pollCountdownInterval);
+      if (!pollData) return;
+      const timerDiv = document.getElementById('poll-timer');
+      function updatePollTimer() {
+        const now = new Date();
+        const closes = new Date(pollData.closes_at);
+        const diff = Math.max(0, Math.floor((closes - now) / 1000));
+        const min = Math.floor(diff / 60);
+        const sec = diff % 60;
+        timerDiv.textContent = `Poll closes in ${min}:${sec.toString().padStart(2, '0')}`;
+        if (diff <= 0) {
+          clearInterval(pollCountdownInterval);
+          showPollResults(pollData.id, true);
+        }
+      }
+      updatePollTimer();
+      pollCountdownInterval = setInterval(updatePollTimer, 1000);
+    }
+
     async function vote(choice) {
       const polls = await fetch('/polls/open').then(r => r.json());
       if (polls.poll) {
@@ -194,10 +260,41 @@
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ choice })
         }).then(() => {
-          document.getElementById('current-poll').innerHTML = '<h3>Thank you for voting!</h3>';
+          // After voting, show results
+          showPollResults(polls.poll.id, false);
         });
       }
     }
+
+    // Show poll results (vote counts per option)
+    function showPollResults(pollId, autoRefresh) {
+      fetch(`/polls/${pollId}/results`)
+        .then(r => r.json())
+        .then(data => {
+          fetch('/polls/open').then(r => r.json()).then(polls => {
+            const poll = polls.poll;
+            let resultsHtml = `<h2>Poll Results</h2>`;
+            if (poll) {
+              resultsHtml += `<p><strong>${poll.question}</strong></p>`;
+            }
+            resultsHtml += '<ul>';
+            data.results.forEach(r => {
+              resultsHtml += `<li>${r.option}: ${r.count} vote${r.count !== 1 ? 's' : ''}</li>`;
+            });
+            resultsHtml += '</ul>';
+            document.getElementById('current-poll').innerHTML = resultsHtml;
+            // After showing results, auto-refresh for next poll/chapter
+            if (autoRefresh) {
+              setTimeout(() => {
+                // Try to reload poll, if no poll, reload chapter
+                loadPoll();
+                // Optionally, reload chapter content here if needed
+              }, 4000); // 4 seconds to view results
+            }
+          });
+        });
+    }
+    // --- END POLL LOGIC ENHANCEMENT ---
   </script>
 </body>
 </html> 

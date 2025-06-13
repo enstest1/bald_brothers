@@ -1,0 +1,14 @@
+{
+  "name": "bald-brothers",
+  "version": "1.0.0",
+  "functions": {
+    "api": {
+      "verify_jwt": true
+    }
+  },
+  "edge_functions": {
+    "api": {
+      "verify_jwt": true
+    }
+  }
+} 
