@@ -169,6 +169,19 @@ For issues and support:
 - Project maintainers
 - Technical documentation
 
+## Poll & Story System Status (Testing)
+- Poll timer (10s in dev mode): Working
+- Voting and result display: Working (but needs UI/UX polish)
+- Poll closes and tallies votes: Working
+- Next chapter generated after poll: NOT YET IMPLEMENTED
+- Two new story options per chapter: NOT YET IMPLEMENTED
+- Full story branching loop: NOT YET IMPLEMENTED
+
+### Next Steps
+- Automate next chapter generation based on poll result
+- Present two new story options for each poll after a chapter
+- Ensure seamless story branching and user experience
+
 ---
 Last Updated: [Current Date]
 Maintainer: [Your Name]

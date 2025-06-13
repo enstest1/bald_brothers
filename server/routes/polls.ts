@@ -38,7 +38,7 @@ router.get("/open", async (req, res) => {
       .limit(1);
 
     if (error) {
-      log.error(error, "Failed to fetch open polls");
+      log.error((error as any)?.message || String(error), "Failed to fetch open polls");
       return res.status(500).json({ error: "Failed to fetch polls" });
     }
 
@@ -50,7 +50,7 @@ router.get("/open", async (req, res) => {
     log.info("Retrieved open poll %s", poll.id);
     res.json({ poll });
   } catch (error) {
-    log.error(error, "Error fetching open polls");
+    log.error((error as any)?.message || String(error), "Error fetching open polls");
     res.status(500).json({ error: "Internal server error" });
   }
 });
@@ -81,7 +81,7 @@ router.post("/:id/vote", async (req, res) => {
       .single();
 
     if (pollError || !poll) {
-      log.error(pollError, "Poll not found: %s", pollId);
+      log.error((pollError as any)?.message || String(pollError), "Poll not found: %s", pollId);
       return res.status(404).json({ error: "Poll not found" });
     }
 
@@ -91,7 +91,7 @@ router.post("/:id/vote", async (req, res) => {
 
     // Validate choice is a valid option index
     if (!Array.isArray(poll.options) || typeof choice !== 'number' || choice < 0 || choice >= poll.options.length) {
-      log.warn("Invalid choice %d for poll %s", choice, pollId);
+      log.warn(`Invalid choice ${choice} for poll ${pollId}`);
       return res.status(400).json({ error: `Invalid choice. Must be an integer between 0 and ${poll.options.length - 1}` });
     }
 
@@ -117,11 +117,11 @@ router.post("/:id/vote", async (req, res) => {
           .eq("client_id", clientId);
         
         if (updateError) {
-          log.error(updateError, "Failed to update vote");
+          log.error((updateError as any)?.message || String(updateError), "Failed to update vote");
           return res.status(500).json({ error: "Failed to record vote" });
         }
       } else {
-        log.error(error, "Failed to record vote");
+        log.error((error as any)?.message || String(error), "Failed to record vote");
         return res.status(500).json({ error: "Failed to record vote" });
       }
     }
@@ -129,7 +129,7 @@ router.post("/:id/vote", async (req, res) => {
     log.info("Vote recorded successfully for client %s", clientId);
     res.json({ success: true, clientId });
   } catch (error) {
-    log.error(error, "Error recording vote");
+    log.error((error as any)?.message || String(error), "Error recording vote");
     res.status(500).json({ error: "Internal server error" });
   }
 });
@@ -141,10 +141,8 @@ router.post("/create", async (req, res) => {
     
     log.info("Creating new poll: %s", question);
 
-    // Set poll duration based on environment
-    const pollDuration = process.env.NODE_ENV === 'production' 
-      ? 24 * 60 * 60 * 1000  // 24 hours in production
-      : 10 * 1000;           // 10 seconds in development
+    // TEMP: Force poll duration to 10 seconds in ALL environments for rapid testing
+    const pollDuration = 10 * 1000; // 10 seconds (remove this for real production)
 
     const { data, error } = await supabase
       .from("polls")
@@ -156,13 +154,13 @@ router.post("/create", async (req, res) => {
       .select()
       .single();
     if (error) {
-      log.error(error, "Failed to create poll");
+      log.error((error as any)?.message || String(error), "Failed to create poll");
       return res.status(500).json({ error: "Failed to create poll" });
     }
     log.info("Poll created with ID %s and options %o", data.id, ["yes", "no"]);
     res.json({ poll: data });
   } catch (error) {
-    log.error(error, "Error creating poll");
+    log.error((error as any)?.message || String(error), "Error creating poll");
     res.status(500).json({ error: "Internal server error" });
   }
 });
@@ -194,7 +192,7 @@ router.post("/close-current", async (req, res) => {
       .eq("poll_id", poll.id);
 
     if (voteError) {
-      log.error(voteError, "Failed to fetch votes for poll %s", poll.id);
+      log.error((voteError as any)?.message || String(voteError), "Failed to fetch votes for poll %s", poll.id);
       return res.status(500).json({ error: "Failed to tally votes" });
     }
 
@@ -209,7 +207,7 @@ router.post("/close-current", async (req, res) => {
       .eq("id", poll.id);
 
     if (closeError) {
-      log.error(closeError, "Failed to close poll %s", poll.id);
+      log.error((closeError as any)?.message || String(closeError), "Failed to close poll %s", poll.id);
       return res.status(500).json({ error: "Failed to close poll" });
     }
 
@@ -258,10 +256,10 @@ router.post("/close-current", async (req, res) => {
 
         log.info("Chapter generation triggered successfully after poll closure");
       } catch (chapterError) {
-        log.error(chapterError, "Failed to trigger chapter generation after poll closure");
+        log.error((chapterError as any)?.message || String(chapterError), "Failed to trigger chapter generation after poll closure");
       }
     } catch (cloudError) {
-      log.error(cloudError, "Failed to save poll results to Bootoshi Cloud");
+      log.error((cloudError as any)?.message || String(cloudError), "Failed to save poll results to Bootoshi Cloud");
     }
 
     // Create new poll for next week
@@ -304,12 +302,12 @@ router.post("/close-current", async (req, res) => {
 
       log.info("New poll created with ID %s and options %o", newPoll.id, pollOptions);
     } catch (newPollError) {
-      log.error(newPollError, "Failed to create new poll");
+      log.error((newPollError as any)?.message || String(newPollError), "Failed to create new poll");
     }
 
     res.json(result);
   } catch (error) {
-    log.error(error, "Error closing poll");
+    log.error((error as any)?.message || String(error), "Error closing poll");
     res.status(500).json({ error: "Internal server error" });
   }
 });
@@ -334,7 +332,7 @@ router.get("/:id/results", async (req, res) => {
       .eq("id", pollId)
       .single();
     if (pollError || !poll) {
-      log.error(pollError, "Poll not found: %s", pollId);
+      log.error((pollError as any)?.message || String(pollError), "Poll not found: %s", pollId);
       return res.status(404).json({ error: "Poll not found" });
     }
     const options = poll.options;
@@ -345,7 +343,7 @@ router.get("/:id/results", async (req, res) => {
       .select("choice")
       .eq("poll_id", pollId);
     if (voteError) {
-      log.error(voteError, "Failed to fetch votes for poll %s", pollId);
+      log.error((voteError as any)?.message || String(voteError), "Failed to fetch votes for poll %s", pollId);
       return res.status(500).json({ error: "Failed to fetch votes" });
     }
 
@@ -357,7 +355,7 @@ router.get("/:id/results", async (req, res) => {
     log.info("Poll %s results: %o", pollId, counts);
     res.json({ results: counts });
   } catch (error) {
-    log.error(error, "Error fetching poll results");
+    log.error((error as any)?.message || String(error), "Error fetching poll results");
     res.status(500).json({ error: "Internal server error" });
   }
 });
@@ -386,7 +384,7 @@ async function generateStoryOptions(chapterContent: string) {
       choices: options.choices
     };
   } catch (error) {
-    log.error(error, "Failed to generate story options");
+    log.error((error as any)?.message || String(error), "Failed to generate story options");
     // Fallback options if generation fails
     return {
       question: "What path should the Bald Brothers take?",
