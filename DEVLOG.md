@@ -170,17 +170,17 @@ For issues and support:
 - Technical documentation
 
 ## Poll & Story System Status (Testing)
-- Poll timer (10s in dev mode): Working
+- Poll timer (10s in all modes for now): Working
 - Voting and result display: Working (but needs UI/UX polish)
 - Poll closes and tallies votes: Working
-- Next chapter generated after poll: NOT YET IMPLEMENTED
-- Two new story options per chapter: NOT YET IMPLEMENTED
-- Full story branching loop: NOT YET IMPLEMENTED
+- Next chapter generated after poll: IMPLEMENTED
+- Two new story options per chapter: IMPLEMENTED
+- Full story branching loop: IMPLEMENTED
 
 ### Next Steps
-- Automate next chapter generation based on poll result
-- Present two new story options for each poll after a chapter
-- Ensure seamless story branching and user experience
+- Polish UI/UX for voting/results
+- Add more advanced story analytics and admin controls
+- Continue to monitor and optimize story branching and user experience
 
 ---
 Last Updated: [Current Date]
