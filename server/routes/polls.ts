@@ -18,7 +18,8 @@ const log = winston.createLogger({
   level: 'info',
   format: winston.format.combine(
     winston.format.timestamp(),
-    winston.format.printf(({ timestamp, level, message, ...meta }) => {
+    winston.format.printf((info) => {
+      const { timestamp, level, message, ...meta } = info as { timestamp: string; level: string; message: string };
       return `${timestamp} [${level.toUpperCase()}]: ${message} ${Object.keys(meta).length ? JSON.stringify(meta) : ''}`;
     })
   ),

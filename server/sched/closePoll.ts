@@ -60,7 +60,7 @@ async function generateStoryOptions(chapterContent: string) {
  */
 export async function closePollAndTally() {
   try {
-    log.info("[Scheduler] Starting scheduled poll closure and tally");
+    log.info("[Scheduler] Triggered scheduled poll closure (every 10s)");
 
     // Get the most recent open poll
     const { data: polls, error: pollError } = await supabase
@@ -81,7 +81,8 @@ export async function closePollAndTally() {
     }
 
     const poll = polls[0];
-    log.info(`[Scheduler] Closing poll ${poll.id}: ${poll.question}`);
+    const pollType = (poll.options.length === 2 && poll.options[0] === "yes" && poll.options[1] === "no") ? "yes/no" : "two-choice";
+    log.info(`[Scheduler] Closing poll ${poll.id} (${pollType}): ${poll.question}`);
 
     // Get vote counts for each option
     const { data: votes, error: voteError } = await supabase
@@ -101,6 +102,7 @@ export async function closePollAndTally() {
     }));
     const totalVotes = votes.length;
     const winner = counts.reduce((max, curr) => curr.count > max.count ? curr : max, counts[0]);
+    log.info(`[Scheduler] Poll ${poll.id} closed. Results: ${JSON.stringify(counts)} | Winner: ${winner.option}`);
 
     // Close the poll in the DB
     const { error: closeError } = await supabase
@@ -112,24 +114,19 @@ export async function closePollAndTally() {
       return;
     }
 
-    const result = {
-      pollId: poll.id,
-      question: poll.question,
-      totalVotes,
-      results: counts,
-      winner: winner.option
-    };
-    log.info(`[Scheduler] Poll ${poll.id} closed. Results: ${JSON.stringify(result.results)}`);
-
     // Store poll results in Bootoshi Cloud for agent context
     try {
       await cloud("add", {
         agent_id: "poll",
         run_id: "weekly",
-        memories: `Poll closed: \"${poll.question}\". Results: ${JSON.stringify(result.results)}. Winner: ${result.winner}`,
+        memories: `Poll closed: \"${poll.question}\". Results: ${JSON.stringify(counts)}. Winner: ${winner.option}`,
         store_mode: "vector",
         metadata: {
-          ...result,
+          pollId: poll.id,
+          question: poll.question,
+          totalVotes,
+          results: counts,
+          winner: winner.option,
           ts: Date.now(),
           type: "poll_result"
         },
@@ -140,34 +137,37 @@ export async function closePollAndTally() {
       log.error((cloudError as any)?.message || String(cloudError), "Failed to save poll results to Bootoshi Cloud");
     }
 
-    // Trigger chapter generation after poll closes
-    try {
-      log.info("[Scheduler] Triggering chapter generation after poll closure");
-      const chapterResponse = await fetch(`${process.env.API_URL}/api/worlds/1/arcs/1/progress`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${process.env.API_TOKEN}`
+    // Only generate a chapter after a two-choice poll
+    if (pollType === "two-choice") {
+      try {
+        log.info(`[Scheduler] Triggering chapter generation for poll ${poll.id}, winning option: ${winner.option}`);
+        const chapterResponse = await fetch(`${process.env.API_URL}/api/worlds/1/arcs/1/progress`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${process.env.API_TOKEN}`
+          }
+        });
+        if (!chapterResponse.ok) {
+          throw new Error(`Chapter generation failed: ${chapterResponse.statusText}`);
         }
-      });
-      if (!chapterResponse.ok) {
-        throw new Error(`Chapter generation failed: ${chapterResponse.statusText}`);
+        const chapterData: any = await chapterResponse.json();
+        const chapterPreview = typeof chapterData.body === 'string' ? chapterData.body.slice(0, 100) : '[no body]';
+        log.info(`[Scheduler] Chapter generated for poll ${poll.id}, winning option: ${winner.option} | Chapter: ${chapterPreview}`);
+      } catch (chapterError) {
+        log.error((chapterError as any)?.message || String(chapterError), "Failed to trigger chapter generation after poll closure");
       }
-      log.info("[Scheduler] Chapter generation triggered successfully after poll closure");
-    } catch (chapterError) {
-      log.error((chapterError as any)?.message || String(chapterError), "Failed to trigger chapter generation after poll closure");
+    } else {
+      log.info(`[Scheduler] Skipping chapter generation for yes/no poll ${poll.id}`);
     }
-
-    // Determine if the current poll was a yes/no poll or a story options poll
-    const isYesNoPoll = poll.options.length === 2 && poll.options[0] === "yes" && poll.options[1] === "no";
 
     // Create the next poll based on the current poll type
     try {
       let pollOptions;
       let pollQuestion;
 
-      if (isYesNoPoll) {
-        // If the current poll was a yes/no poll, create a story options poll
+      if (pollType === "yes/no") {
+        // After yes/no, create a two-choice poll
         const { data: latestChapter, error: chapterError } = await supabase
           .from("beats")
           .select("*")
@@ -186,7 +186,7 @@ export async function closePollAndTally() {
           log.info("[Scheduler] Generated new story options poll from latest chapter");
         }
       } else {
-        // If the current poll was a story options poll, create a yes/no poll
+        // After two-choice, create a yes/no poll
         pollQuestion = "Should the Bald Brothers continue their quest?";
         pollOptions = ["yes", "no"];
         log.info("[Scheduler] Creating new yes/no poll");
@@ -207,7 +207,8 @@ export async function closePollAndTally() {
       if (newPollError) {
         throw newPollError;
       }
-      log.info(`[Scheduler] New poll created with ID ${newPoll.id} and options ${JSON.stringify(pollOptions)}`);
+      const nextPollType = (pollOptions.length === 2 && pollOptions[0] === "yes" && pollOptions[1] === "no") ? "yes/no" : "two-choice";
+      log.info(`[Scheduler] New poll created with ID ${newPoll.id} (${nextPollType}) and options ${JSON.stringify(pollOptions)}`);
     } catch (newPollError) {
       log.error((newPollError as any)?.message || String(newPollError), "Failed to create new poll");
     }
@@ -224,9 +225,12 @@ export function startPollScheduler() {
   log.info("🤖🦾 [AI DEBUG] If you see this, the AI overlords have hijacked your poll scheduler! Polls will close every 10 seconds. Resistance is futile. [session:" + Date.now() + "]");
   cron.schedule("*/10 * * * * *", async () => {
     log.info("[Scheduler] Triggered scheduled poll closure (every 10s)");
+    const startTime = Date.now();
     await closePollAndTally();
+    const endTime = Date.now();
+    log.info(`[Scheduler] Poll closure and next poll creation completed in ${endTime - startTime}ms`);
     // Add a small delay to avoid race conditions
-    await new Promise(resolve => setTimeout(resolve, 2000));
+    await new Promise(resolve => setTimeout(resolve, 60000)); // 60 seconds delay
   });
   log.info("[Scheduler] Poll scheduler started - will close polls every 10 seconds (testing mode)");
 }
