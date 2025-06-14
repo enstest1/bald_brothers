@@ -28,6 +28,9 @@ const log = winston.createLogger({
   ],
 });
 
+// Ensure poll durations are at least 30s in dev/test
+const pollDuration = process.env.NODE_ENV === 'production' ? 24 * 60 * 60 * 1000 : 30 * 1000;
+
 // Create initial yes/no poll if no chapters exist
 async function createInitialPoll() {
   const { data: chapters } = await supabase
@@ -41,7 +44,7 @@ async function createInitialPoll() {
       .insert({
         question: "Should the Bald Brothers begin their quest?",
         options: ["yes", "no"],
-        closes_at: new Date(Date.now() + (process.env.NODE_ENV === 'production' ? 24 * 60 * 60 * 1000 : 30 * 1000))
+        closes_at: new Date(Date.now() + pollDuration)
       })
       .select()
       .single();
@@ -172,9 +175,6 @@ router.post("/create", async (req, res) => {
     
     log.info("Creating new poll: %s", question);
 
-    // TEMP: Force poll duration to 10 seconds in ALL environments for rapid testing
-    const pollDuration = 10 * 1000; // 10 seconds (remove this for real production)
-
     const { data, error } = await supabase
       .from("polls")
       .insert({
@@ -292,7 +292,7 @@ router.post("/close-current", async (req, res) => {
         .insert({
           question: pollQuestion,
           options: pollOptions,
-          closes_at: new Date(Date.now() + (process.env.NODE_ENV === 'production' ? 24 * 60 * 60 * 1000 : 30 * 1000))
+          closes_at: new Date(Date.now() + pollDuration)
         })
         .select()
         .single();
@@ -402,6 +402,24 @@ async function generateStoryOptions(chapterContent: string) {
         "Train with the wise bald masters in the mountains"
       ]
     };
+  }
+}
+
+// Helper to save a chapter with validation and fallback
+async function saveChapterWithValidation(chapterData: { body?: string, title?: string }) {
+  let body = chapterData?.body;
+  let title = chapterData?.title || 'Untitled Chapter';
+  if (!body || typeof body !== 'string' || body.trim().length < 10) {
+    // Fallback content
+    body = 'The Bald Brothers continue their journey, but the details are lost to legend. The story will resume with the next decision.';
+    title = 'A Lost Chapter';
+    log.warn('[Polls] Chapter generation failed, using fallback content.');
+  }
+  const { error } = await supabase.from('beats').insert({ arc_id: '1', body, title, authored_at: new Date() });
+  if (error) {
+    log.error((error as any)?.message || String(error), 'Failed to save chapter');
+  } else {
+    log.info(`[Polls] Chapter saved: ${title}`);
   }
 }
 
