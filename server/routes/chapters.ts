@@ -46,4 +46,27 @@ router.post("/worlds/:id/arcs/:arcId/progress", async (req, res) => {
   }
 });
 
+// Add endpoint to get the latest chapter
+router.get("/beats/latest", async (req, res) => {
+  try {
+    const { data: chapters, error } = await supabase
+      .from("beats")
+      .select("*")
+      .order("authored_at", { ascending: false })
+      .limit(1);
+    if (error) {
+      log.error(error, "Failed to fetch latest chapter");
+      return res.status(500).json({ error: "Failed to fetch latest chapter" });
+    }
+    if (!chapters || chapters.length === 0) {
+      return res.json({ title: "No chapters yet", body: "The story has not begun." });
+    }
+    // Optionally, you can parse a title from the body or add a title field
+    res.json({ title: `Chapter ${chapters[0].id?.slice(0, 4) || ''}`, body: chapters[0].body });
+  } catch (err) {
+    log.error(err, "Error fetching latest chapter");
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
 export default router;

@@ -297,7 +297,7 @@
                 postTimerDiv.textContent = `Next chapter in ${postCountdown}s...`;
                 if (postCountdown <= 0) {
                   clearInterval(postPollCountdownInterval);
-                  loadPoll(); // This will show the new poll/chapter
+                  fetchAndDisplayLatestChapter();
                 }
                 postCountdown--;
               }
@@ -308,6 +308,23 @@
         });
     }
     // --- END POLL LOGIC ENHANCEMENT ---
+
+    // --- CHAPTER FETCHING ---
+    async function fetchAndDisplayLatestChapter() {
+      try {
+        // Try to fetch the latest chapter from the backend
+        const res = await fetch('/api/beats/latest');
+        if (!res.ok) throw new Error('Failed to fetch latest chapter');
+        const data = await res.json();
+        if (data && data.body) {
+          storyHeading.textContent = data.title || 'Latest Chapter';
+          chapterContent.style.display = 'block';
+          chapterContent.innerHTML = `<p>${data.body}</p>`;
+        }
+      } catch (err) {
+        chapterContent.innerHTML = '<p>Unable to load latest chapter.</p>';
+      }
+    }
   </script>
 </body>
 </html> 

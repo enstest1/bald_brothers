@@ -35,8 +35,8 @@ const supabase = createClient(
  */
 async function generateStoryOptions(chapterContent: string) {
   try {
-    // Use the ChapterAgent to generate two different story options
-    const result = await ChapterAgent.run(`Based on this chapter:\n"${chapterContent}"\n\nGenerate two different story options for the next chapter. One should be a darker turn, and one should be more focused on the Bald Brothers' journey. Format the response as:{\n  \"question\": \"What path should the Bald Brothers take?\",\n  \"choices\": [\"Option 1\", \"Option 2\"]\n}`);
+    // Use the ChapterAgent to generate two concise story options
+    const result = await ChapterAgent.run(`Based on this chapter:\n"${chapterContent}"\n\nGenerate two different story options for the next chapter. Each option should be a single sentence, no more than 150 characters. Format the response as:{\n  \"question\": \"What path should the Bald Brothers take?\",\n  \"choices\": [\"Option 1\", \"Option 2\"]\n}`);
     if (!result.success) throw new Error("Failed to generate story options");
     const options = JSON.parse(result.output as string);
     return { question: options.question, choices: options.choices };
@@ -249,6 +249,7 @@ export async function closePollAndTally() {
     // If this is a two-choice poll, generate a chapter and then another two-choice poll
     if (!isYesNoPoll) {
       log.info(`[Scheduler] Generating chapter after two-choice poll (poll ID: ${poll.id})`);
+      let chapterSaved = false;
       try {
         const chapterResponse = await fetch(`${process.env.API_URL}/api/worlds/1/arcs/1/progress`, {
           method: 'POST',
@@ -263,24 +264,41 @@ export async function closePollAndTally() {
         const chapterData: any = await chapterResponse.json();
         const chapterPreview = typeof chapterData.body === 'string' ? chapterData.body.slice(0, 100) : '[no body]';
         log.info(`[Scheduler] Chapter generated: ${chapterPreview}`);
+        // Confirm chapter is saved in DB
+        const { data: latestChapter, error: chapterError } = await supabase
+          .from("beats")
+          .select("*")
+          .order("authored_at", { ascending: false })
+          .limit(1)
+          .single();
+        if (!chapterError && latestChapter && latestChapter.body === chapterData.body) {
+          chapterSaved = true;
+        } else {
+          log.error("[Scheduler] Chapter not found in DB after generation");
+        }
       } catch (chapterError) {
         log.error((chapterError as any)?.message || String(chapterError), "Failed to generate chapter after two-choice poll");
       }
+      if (!chapterSaved) {
+        log.error("[Scheduler] Aborting poll creation: chapter not confirmed saved.");
+        return;
+      }
       // Now create the next two-choice poll
-      const { data: latestChapter, error: chapterError } = await supabase
-        .from("beats")
-        .select("*")
-        .order("authored_at", { ascending: false })
-        .limit(1)
-        .single();
       let pollQuestion, pollOptions;
-      if (chapterError || !latestChapter) {
-        pollQuestion = "What path should the Bald Brothers take?";
-        pollOptions = ["Seek the ancient bald scrolls in the dark temple", "Train with the wise bald masters in the mountains"];
-      } else {
+      try {
+        const { data: latestChapter } = await supabase
+          .from("beats")
+          .select("*")
+          .order("authored_at", { ascending: false })
+          .limit(1)
+          .single();
+        if (!latestChapter) throw new Error("No latest chapter found");
         const options = await generateStoryOptions(latestChapter.body);
         pollQuestion = options.question;
         pollOptions = options.choices;
+      } catch (err) {
+        pollQuestion = "What path should the Bald Brothers take?";
+        pollOptions = ["Seek the ancient bald scrolls in the dark temple", "Train with the wise bald masters in the mountains"];
       }
       const { data: newPoll, error: newPollError } = await supabase
         .from("polls")
