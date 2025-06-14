@@ -225,8 +225,8 @@ export async function closePollAndTally() {
         if (!chapterResponse.ok) {
           throw new Error(`Chapter generation failed: ${chapterResponse.statusText}`);
         }
-        const chapterData: any = await chapterResponse.json();
-        await saveChapterWithValidation(chapterData as { body?: string, title?: string });
+        const chapterData = await chapterResponse.json() as unknown as { body?: string, title?: string };
+        await saveChapterWithValidation(chapterData);
       } catch (chapterError) {
         log.error((chapterError as any)?.message || String(chapterError), "Failed to generate first chapter after yes/no poll");
         // Fallback: save a default chapter
@@ -280,8 +280,8 @@ export async function closePollAndTally() {
         if (!chapterResponse.ok) {
           throw new Error(`Chapter generation failed: ${chapterResponse.statusText}`);
         }
-        const chapterData = await chapterResponse.json();
-        await saveChapterWithValidation(chapterData as { body?: string, title?: string });
+        const chapterData = await chapterResponse.json() as unknown as { body?: string, title?: string };
+        await saveChapterWithValidation(chapterData);
         // Confirm chapter is saved in DB
         const { data: latestChapter, error: chapterError } = await supabase
           .from("beats")
