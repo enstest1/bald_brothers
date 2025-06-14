@@ -62,6 +62,18 @@ export async function closePollAndTally() {
   try {
     log.info("[Scheduler] Triggered scheduled poll closure (every 10s)");
 
+    // Check if any chapters exist
+    const { data: chapters, error: chaptersError } = await supabase
+      .from("beats")
+      .select("*")
+      .order("authored_at", { ascending: false })
+      .limit(1);
+    if (chaptersError) {
+      log.error((chaptersError as any)?.message || String(chaptersError), "Failed to fetch chapters");
+      return;
+    }
+    const hasChapters = chapters && chapters.length > 0;
+
     // Get the most recent open poll
     const { data: polls, error: pollError } = await supabase
       .from("polls")
@@ -69,32 +81,76 @@ export async function closePollAndTally() {
       .gt("closes_at", new Date().toISOString())
       .order("closes_at", { ascending: true })
       .limit(1);
-
     if (pollError) {
       log.error((pollError as any)?.message || String(pollError), "Failed to fetch open polls");
       return;
     }
 
+    // If no open poll exists
     if (!polls || polls.length === 0) {
-      log.info("[Scheduler] No open polls to close");
-      return;
+      if (!hasChapters) {
+        // No chapters yet: create the initial yes/no poll
+        log.info("[Scheduler] No chapters found, creating initial yes/no poll");
+        const { data: newPoll, error: newPollError } = await supabase
+          .from("polls")
+          .insert({
+            question: "Should the Bald Brothers begin their quest?",
+            options: ["yes", "no"],
+            closes_at: new Date(Date.now() + 30000) // 30 seconds
+          })
+          .select()
+          .single();
+        if (newPollError) {
+          log.error((newPollError as any)?.message || String(newPollError), "Failed to create initial yes/no poll");
+        } else {
+          log.info(`[Scheduler] Initial yes/no poll created with ID ${newPoll.id}`);
+        }
+        return;
+      } else {
+        // Chapters exist, create a two-choice poll
+        log.info("[Scheduler] No open poll, creating new two-choice poll");
+        const latestChapter = chapters[0];
+        let pollQuestion, pollOptions;
+        try {
+          const options = await generateStoryOptions(latestChapter.body);
+          pollQuestion = options.question;
+          pollOptions = options.choices;
+        } catch (err) {
+          pollQuestion = "What path should the Bald Brothers take?";
+          pollOptions = ["Seek the ancient bald scrolls in the dark temple", "Train with the wise bald masters in the mountains"];
+        }
+        const { data: newPoll, error: newPollError } = await supabase
+          .from("polls")
+          .insert({
+            question: pollQuestion,
+            options: pollOptions,
+            closes_at: new Date(Date.now() + 30000) // 30 seconds
+          })
+          .select()
+          .single();
+        if (newPollError) {
+          log.error((newPollError as any)?.message || String(newPollError), "Failed to create two-choice poll");
+        } else {
+          log.info(`[Scheduler] New two-choice poll created with ID ${newPoll.id} and options ${JSON.stringify(pollOptions)}`);
+        }
+        return;
+      }
     }
 
+    // There is an open poll to close
     const poll = polls[0];
-    const pollType = (poll.options.length === 2 && poll.options[0] === "yes" && poll.options[1] === "no") ? "yes/no" : "two-choice";
-    log.info(`[Scheduler] Closing poll ${poll.id} (${pollType}): ${poll.question}`);
+    const isYesNoPoll = poll.options.length === 2 && poll.options[0] === "yes" && poll.options[1] === "no";
+    log.info(`[Scheduler] Closing poll ${poll.id} (${isYesNoPoll ? 'yes/no' : 'two-choice'}): ${poll.question}`);
 
     // Get vote counts for each option
     const { data: votes, error: voteError } = await supabase
       .from("votes")
       .select("choice")
       .eq("poll_id", poll.id);
-
     if (voteError) {
       log.error((voteError as any)?.message || String(voteError), `Failed to fetch votes for poll ${poll.id}`);
       return;
     }
-
     const options: string[] = poll.options;
     const counts = options.map((opt: string, idx: number) => ({
       option: opt,
@@ -137,10 +193,10 @@ export async function closePollAndTally() {
       log.error((cloudError as any)?.message || String(cloudError), "Failed to save poll results to Bootoshi Cloud");
     }
 
-    // Only generate a chapter after a two-choice poll
-    if (pollType === "two-choice") {
+    // If this was the initial yes/no poll and there are no chapters, generate the first chapter and then a two-choice poll
+    if (isYesNoPoll && !hasChapters) {
+      log.info(`[Scheduler] Generating first chapter after initial yes/no poll (poll ID: ${poll.id})`);
       try {
-        log.info(`[Scheduler] Triggering chapter generation for poll ${poll.id}, winning option: ${winner.option}`);
         const chapterResponse = await fetch(`${process.env.API_URL}/api/worlds/1/arcs/1/progress`, {
           method: 'POST',
           headers: {
@@ -153,64 +209,100 @@ export async function closePollAndTally() {
         }
         const chapterData: any = await chapterResponse.json();
         const chapterPreview = typeof chapterData.body === 'string' ? chapterData.body.slice(0, 100) : '[no body]';
-        log.info(`[Scheduler] Chapter generated for poll ${poll.id}, winning option: ${winner.option} | Chapter: ${chapterPreview}`);
+        log.info(`[Scheduler] First chapter generated: ${chapterPreview}`);
       } catch (chapterError) {
-        log.error((chapterError as any)?.message || String(chapterError), "Failed to trigger chapter generation after poll closure");
+        log.error((chapterError as any)?.message || String(chapterError), "Failed to generate first chapter after yes/no poll");
       }
-    } else {
-      log.info(`[Scheduler] Skipping chapter generation for yes/no poll ${poll.id}`);
-    }
-
-    // Create the next poll based on the current poll type
-    try {
-      let pollOptions;
-      let pollQuestion;
-
-      if (pollType === "yes/no") {
-        // After yes/no, create a two-choice poll
-        const { data: latestChapter, error: chapterError } = await supabase
-          .from("beats")
-          .select("*")
-          .order("authored_at", { ascending: false })
-          .limit(1)
-          .single();
-
-        if (chapterError || !latestChapter) {
-          pollQuestion = "What path should the Bald Brothers take?";
-          pollOptions = ["Seek the ancient bald scrolls in the dark temple", "Train with the wise bald masters in the mountains"];
-          log.info("[Scheduler] No chapter found, using default story options poll");
-        } else {
-          const options = await generateStoryOptions(latestChapter.body);
-          pollQuestion = options.question;
-          pollOptions = options.choices;
-          log.info("[Scheduler] Generated new story options poll from latest chapter");
-        }
+      // Now create the first two-choice poll
+      const { data: latestChapter, error: chapterError } = await supabase
+        .from("beats")
+        .select("*")
+        .order("authored_at", { ascending: false })
+        .limit(1)
+        .single();
+      let pollQuestion, pollOptions;
+      if (chapterError || !latestChapter) {
+        pollQuestion = "What path should the Bald Brothers take?";
+        pollOptions = ["Seek the ancient bald scrolls in the dark temple", "Train with the wise bald masters in the mountains"];
       } else {
-        // After two-choice, create a yes/no poll
-        pollQuestion = "Should the Bald Brothers continue their quest?";
-        pollOptions = ["yes", "no"];
-        log.info("[Scheduler] Creating new yes/no poll");
+        const options = await generateStoryOptions(latestChapter.body);
+        pollQuestion = options.question;
+        pollOptions = options.choices;
       }
-
-      // Always use 10s poll duration for now (testing)
-      const pollDuration = 10 * 1000;
       const { data: newPoll, error: newPollError } = await supabase
         .from("polls")
         .insert({
           question: pollQuestion,
           options: pollOptions,
-          closes_at: new Date(Date.now() + pollDuration)
+          closes_at: new Date(Date.now() + 30000) // 30 seconds
         })
         .select()
         .single();
-
       if (newPollError) {
-        throw newPollError;
+        log.error((newPollError as any)?.message || String(newPollError), "Failed to create first two-choice poll");
+      } else {
+        log.info(`[Scheduler] First two-choice poll created with ID ${newPoll.id} and options ${JSON.stringify(pollOptions)}`);
       }
-      const nextPollType = (pollOptions.length === 2 && pollOptions[0] === "yes" && pollOptions[1] === "no") ? "yes/no" : "two-choice";
-      log.info(`[Scheduler] New poll created with ID ${newPoll.id} (${nextPollType}) and options ${JSON.stringify(pollOptions)}`);
-    } catch (newPollError) {
-      log.error((newPollError as any)?.message || String(newPollError), "Failed to create new poll");
+      return;
+    }
+
+    // If this is a two-choice poll, generate a chapter and then another two-choice poll
+    if (!isYesNoPoll) {
+      log.info(`[Scheduler] Generating chapter after two-choice poll (poll ID: ${poll.id})`);
+      try {
+        const chapterResponse = await fetch(`${process.env.API_URL}/api/worlds/1/arcs/1/progress`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${process.env.API_TOKEN}`
+          }
+        });
+        if (!chapterResponse.ok) {
+          throw new Error(`Chapter generation failed: ${chapterResponse.statusText}`);
+        }
+        const chapterData: any = await chapterResponse.json();
+        const chapterPreview = typeof chapterData.body === 'string' ? chapterData.body.slice(0, 100) : '[no body]';
+        log.info(`[Scheduler] Chapter generated: ${chapterPreview}`);
+      } catch (chapterError) {
+        log.error((chapterError as any)?.message || String(chapterError), "Failed to generate chapter after two-choice poll");
+      }
+      // Now create the next two-choice poll
+      const { data: latestChapter, error: chapterError } = await supabase
+        .from("beats")
+        .select("*")
+        .order("authored_at", { ascending: false })
+        .limit(1)
+        .single();
+      let pollQuestion, pollOptions;
+      if (chapterError || !latestChapter) {
+        pollQuestion = "What path should the Bald Brothers take?";
+        pollOptions = ["Seek the ancient bald scrolls in the dark temple", "Train with the wise bald masters in the mountains"];
+      } else {
+        const options = await generateStoryOptions(latestChapter.body);
+        pollQuestion = options.question;
+        pollOptions = options.choices;
+      }
+      const { data: newPoll, error: newPollError } = await supabase
+        .from("polls")
+        .insert({
+          question: pollQuestion,
+          options: pollOptions,
+          closes_at: new Date(Date.now() + 30000) // 30 seconds
+        })
+        .select()
+        .single();
+      if (newPollError) {
+        log.error((newPollError as any)?.message || String(newPollError), "Failed to create next two-choice poll");
+      } else {
+        log.info(`[Scheduler] Next two-choice poll created with ID ${newPoll.id} and options ${JSON.stringify(pollOptions)}`);
+      }
+      return;
+    }
+
+    // If this was a yes/no poll but chapters already exist, do nothing (should not happen)
+    if (isYesNoPoll && hasChapters) {
+      log.warn(`[Scheduler] Closed a yes/no poll but chapters already exist. No further action taken.`);
+      return;
     }
   } catch (error) {
     log.error((error as any)?.message || String(error), "Error in scheduled poll closure");
