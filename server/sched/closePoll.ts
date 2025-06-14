@@ -158,30 +158,38 @@ export async function closePollAndTally() {
       log.error((chapterError as any)?.message || String(chapterError), "Failed to trigger chapter generation after poll closure");
     }
 
-    // Create the next poll for the next chapter
-    try {
-      // Get the latest chapter to generate contextual options
-      const { data: latestChapter, error: chapterError } = await supabase
-        .from("beats")
-        .select("*")
-        .order("authored_at", { ascending: false })
-        .limit(1)
-        .single();
+    // Determine if the current poll was a yes/no poll or a story options poll
+    const isYesNoPoll = poll.options.length === 2 && poll.options[0] === "yes" && poll.options[1] === "no";
 
+    // Create the next poll based on the current poll type
+    try {
       let pollOptions;
       let pollQuestion;
 
-      if (chapterError || !latestChapter) {
-        // First poll - use yes/no
-        pollQuestion = "Should the Bald Brothers begin their quest?";
-        pollOptions = ["yes", "no"];
-        log.info("[Scheduler] No chapter found, using default yes/no poll");
+      if (isYesNoPoll) {
+        // If the current poll was a yes/no poll, create a story options poll
+        const { data: latestChapter, error: chapterError } = await supabase
+          .from("beats")
+          .select("*")
+          .order("authored_at", { ascending: false })
+          .limit(1)
+          .single();
+
+        if (chapterError || !latestChapter) {
+          pollQuestion = "What path should the Bald Brothers take?";
+          pollOptions = ["Seek the ancient bald scrolls in the dark temple", "Train with the wise bald masters in the mountains"];
+          log.info("[Scheduler] No chapter found, using default story options poll");
+        } else {
+          const options = await generateStoryOptions(latestChapter.body);
+          pollQuestion = options.question;
+          pollOptions = options.choices;
+          log.info("[Scheduler] Generated new story options poll from latest chapter");
+        }
       } else {
-        // Generate two different story options based on the latest chapter
-        const options = await generateStoryOptions(latestChapter.body);
-        pollQuestion = options.question;
-        pollOptions = options.choices;
-        log.info("[Scheduler] Generated new poll options from latest chapter");
+        // If the current poll was a story options poll, create a yes/no poll
+        pollQuestion = "Should the Bald Brothers continue their quest?";
+        pollOptions = ["yes", "no"];
+        log.info("[Scheduler] Creating new yes/no poll");
       }
 
       // Always use 10s poll duration for now (testing)
@@ -217,6 +225,8 @@ export function startPollScheduler() {
   cron.schedule("*/10 * * * * *", async () => {
     log.info("[Scheduler] Triggered scheduled poll closure (every 10s)");
     await closePollAndTally();
+    // Add a small delay to avoid race conditions
+    await new Promise(resolve => setTimeout(resolve, 2000));
   });
   log.info("[Scheduler] Poll scheduler started - will close polls every 10 seconds (testing mode)");
 }
