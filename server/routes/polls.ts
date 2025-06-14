@@ -389,7 +389,6 @@ async function generateStoryOptions(chapterContent: string) {
 // Helper to robustly generate and save a chapter after poll closes
 async function robustGenerateAndSaveChapter(poll: any, winner: string, totalVotes: number) {
   let chapterBody = '';
-  let chapterTitle = '';
   try {
     // Try to generate chapter using AI agent
     const chapterResponse = await fetch(`${process.env.API_URL}/api/worlds/1/arcs/1/progress`, {
@@ -407,9 +406,8 @@ async function robustGenerateAndSaveChapter(poll: any, winner: string, totalVote
       })
     });
     if (chapterResponse.ok) {
-      const chapterData = await chapterResponse.json() as unknown as { body?: string, output?: string, title?: string };
+      const chapterData = await chapterResponse.json() as unknown as { body?: string, output?: string };
       chapterBody = chapterData.body || chapterData.output || '';
-      chapterTitle = chapterData.title || '';
     }
   } catch (err) {
     log.error((err as Error).message || String(err), 'Error during chapter generation');
@@ -417,14 +415,12 @@ async function robustGenerateAndSaveChapter(poll: any, winner: string, totalVote
   // Fallback if chapterBody is empty
   if (!chapterBody || chapterBody.length < 10) {
     chapterBody = 'The Bald Brothers continue their journey, but the details are lost to legend. The story will resume with the next decision.';
-    chapterTitle = 'A Lost Chapter';
     log.warn('Chapter generation failed, using fallback content.');
   }
-  // Save the chapter
+  // Save the chapter (no title field)
   const { error } = await supabase.from('beats').insert({
     arc_id: '1',
     body: chapterBody,
-    title: chapterTitle,
     authored_at: new Date()
   });
   if (error) {
