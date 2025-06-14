@@ -107,6 +107,7 @@ export async function closePollAndTally() {
 // Schedule the poll closure job to run every Saturday at 23:59 UTC
 export function startPollScheduler() {
   // TEMP: Always run every 10 seconds for testing, regardless of environment
+  log.info("🤖🦾 [AI DEBUG] If you see this, the AI overlords have hijacked your poll scheduler! Polls will close every 10 seconds. Resistance is futile. [session:" + Date.now() + "]");
   cron.schedule("*/10 * * * * *", async () => {
     log.info("Triggered scheduled poll closure (testing, every 10s)");
     await closePollAndTally();
