@@ -4,6 +4,7 @@ import "dotenv/config";
 import chaptersRouter from "./server/routes/chapters";
 import pollsRouter from "./server/routes/polls";
 import { startPollScheduler } from "./server/sched/closePoll";
+import { createClient } from "@supabase/supabase-js";
 const log = require("pino")();
 
 const app = express();
@@ -62,13 +63,57 @@ app.use((err: Error, req: express.Request, res: express.Response, next: express.
   res.status(500).json({ error: "Internal server error" });
 });
 
+const supabase = createClient(
+  process.env.SUPABASE_URL!,
+  process.env.SUPABASE_ANON_KEY!
+);
+
+async function ensureFirstPoll() {
+  log.info("[INIT] Checking for open polls on startup...");
+  const { data: polls, error } = await supabase
+    .from("polls")
+    .select("*")
+    .gt("closes_at", new Date().toISOString())
+    .order("closes_at", { ascending: true })
+    .limit(1);
+
+  if (error) {
+    log.error("[INIT] Error checking for open polls: %s", error.message || error);
+    return;
+  }
+
+  if (!polls || polls.length === 0) {
+    log.info("[INIT] No open polls found. Creating the first poll...");
+    const pollDuration = 10 * 1000; // 10 seconds for testing
+    const { data, error: createError } = await supabase
+      .from("polls")
+      .insert({
+        question: "Should the Bald Brothers start a new adventure?",
+        options: ["yes", "no"],
+        closes_at: new Date(Date.now() + pollDuration)
+      })
+      .select()
+      .single();
+    if (createError) {
+      log.error("[INIT] Failed to create first poll: %s", createError.message || createError);
+    } else {
+      log.info("[INIT] First poll created with ID %s", data.id);
+    }
+  } else {
+    log.info("[INIT] Open poll already exists with ID %s", polls[0].id);
+  }
+}
+
 // Start server
-app.listen(PORT, () => {
+app.listen(PORT, async () => {
   log.info("Bald Brothers Story Engine server started on port %d", PORT);
   log.info("Environment: %s", process.env.NODE_ENV || "development");
   
   // Start the poll scheduler
   startPollScheduler();
+  
+  // Ensure the first poll exists
+  await ensureFirstPoll();
   
   // Log configuration status
   const requiredEnvVars = ["CLOUD_URL", "CLOUD_PASSWORD", "SUPABASE_URL", "SUPABASE_ANON_KEY", "OPENROUTER_API_KEY"];
