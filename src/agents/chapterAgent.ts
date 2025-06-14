@@ -1,6 +1,12 @@
 import { FeatherAgent } from "feather-ai";
-import { cloud } from "../lib/cloudClient";
+import { createClient } from "@supabase/supabase-js";
 const log = require("pino")();
+
+// Initialize Supabase client
+const supabase = createClient(
+  process.env.SUPABASE_URL!,
+  process.env.SUPABASE_ANON_KEY!
+);
 
 export const ChapterAgent = new FeatherAgent({
   model: "openai/gpt-4o-mini",
@@ -14,6 +20,8 @@ Guidelines:
 - Include vivid descriptions, character development, and plot progression
 - End chapters on compelling notes that encourage readers to continue
 - Consider the poll results when deciding the story direction
+- For two-choice polls, incorporate the winning choice into the story naturally
+- Always maintain the mystical and humorous tone of the Bald Brothers universe
 
 You have access to tools to retrieve recent story context and save new chapters.`,
   tools: [
@@ -21,7 +29,7 @@ You have access to tools to retrieve recent story context and save new chapters.
       type: "function",
       function: {
         name: "get_recent",
-        description: "Retrieve the last 3 chapters/memories from the story canon",
+        description: "Retrieve the last 3 chapters from the story",
         parameters: {
           type: "object",
           properties: {},
@@ -29,8 +37,19 @@ You have access to tools to retrieve recent story context and save new chapters.
         }
       },
       execute: async () => {
-        log.info("Fetching last 3 memories");
-        return await cloud("query", { agent_id: "chapter", run_id: "canon", limit: 3 });
+        log.info("Fetching last 3 chapters");
+        const { data: chapters, error } = await supabase
+          .from("beats")
+          .select("*")
+          .order("authored_at", { ascending: false })
+          .limit(3);
+        
+        if (error) {
+          log.error((error as Error).message || String(error), "Failed to fetch recent chapters");
+          return [];
+        }
+        
+        return chapters || [];
       }
     },
     {
@@ -46,41 +65,61 @@ You have access to tools to retrieve recent story context and save new chapters.
       },
       execute: async () => {
         log.info("Fetching recent poll results");
-        return await cloud("query", { 
-          agent_id: "poll", 
-          run_id: "weekly", 
-          limit: 1,
-          filter: { type: "poll_result" }
-        });
+        const { data: polls, error } = await supabase
+          .from("polls")
+          .select("*")
+          .order("closes_at", { ascending: false })
+          .limit(1);
+        
+        if (error) {
+          log.error((error as Error).message || String(error), "Failed to fetch poll results");
+          return null;
+        }
+        
+        return polls?.[0] || null;
       }
     },
     {
       type: "function",
       function: {
-        name: "save",
-        description: "Save the new chapter content to long-term memory",
+        name: "save_chapter",
+        description: "Save the generated chapter to the database",
         parameters: {
           type: "object",
           properties: {
-            content: {
+            title: {
               type: "string",
-              description: "The chapter content to save"
+              description: "The chapter title"
+            },
+            body: {
+              type: "string",
+              description: "The chapter content"
             }
           },
-          required: ["content"]
+          required: ["title", "body"]
         }
       },
       execute: async (args: Record<string, any>) => {
-        const { content } = args as { content: string };
-        log.info("Saving new chapter to mem0");
-        return await cloud("add", {
-          agent_id: "chapter",
-          run_id: "canon",
-          memories: content,
-          store_mode: "vector",
-          metadata: { ts: Date.now() },
-          skip_extraction: true
-        });
+        const { title, body } = args as { title: string; body: string };
+        log.info("Saving new chapter: %s", title);
+        
+        const { data, error } = await supabase
+          .from("beats")
+          .insert({
+            arc_id: "1", // Main story arc
+            title,
+            body,
+            authored_at: new Date()
+          })
+          .select()
+          .single();
+        
+        if (error) {
+          log.error((error as Error).message || String(error), "Failed to save chapter");
+          throw error;
+        }
+        
+        return data;
       }
     }
   ]

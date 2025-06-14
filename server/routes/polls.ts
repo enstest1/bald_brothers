@@ -28,30 +28,60 @@ const log = winston.createLogger({
   ],
 });
 
+// Create initial yes/no poll if no chapters exist
+async function createInitialPoll() {
+  const { data: chapters } = await supabase
+    .from("beats")
+    .select("*")
+    .limit(1);
+
+  if (!chapters || chapters.length === 0) {
+    const { data: newPoll, error } = await supabase
+      .from("polls")
+      .insert({
+        question: "Should the Bald Brothers begin their quest?",
+        options: ["yes", "no"],
+        closes_at: new Date(Date.now() + (process.env.NODE_ENV === 'production' ? 24 * 60 * 60 * 1000 : 30 * 1000))
+      })
+      .select()
+      .single();
+
+    if (error) {
+      log.error((error as Error).message || String(error), "Failed to create initial poll");
+      return null;
+    }
+
+    log.info("Created initial yes/no poll with ID %s", newPoll.id);
+    return newPoll;
+  }
+  return null;
+}
+
 // Get the currently open poll
 router.get("/open", async (req, res) => {
   try {
-    const { data: polls, error } = await supabase
+    // Check for existing open poll
+    const { data: polls, error: pollError } = await supabase
       .from("polls")
       .select("*")
       .gt("closes_at", new Date().toISOString())
       .order("closes_at", { ascending: true })
       .limit(1);
 
-    if (error) {
-      log.error((error as any)?.message || String(error), "Failed to fetch open polls");
-      return res.status(500).json({ error: "Failed to fetch polls" });
+    if (pollError) {
+      log.error((pollError as Error).message || String(pollError), "Failed to fetch open polls");
+      return res.status(500).json({ error: "Internal server error" });
     }
 
+    // If no open poll exists, create initial yes/no poll if no chapters exist
     if (!polls || polls.length === 0) {
-      return res.json({ poll: null });
+      const initialPoll = await createInitialPoll();
+      return res.json({ poll: initialPoll });
     }
 
-    const poll = polls[0];
-    log.info("Retrieved open poll %s", poll.id);
-    res.json({ poll });
+    res.json({ poll: polls[0] });
   } catch (error) {
-    log.error((error as any)?.message || String(error), "Error fetching open polls");
+    log.error((error as Error).message || String(error), "Error in open poll endpoint");
     res.status(500).json({ error: "Internal server error" });
   }
 });
@@ -166,11 +196,9 @@ router.post("/create", async (req, res) => {
   }
 });
 
-// Close current poll and tally results
+// Close current poll and create next poll
 router.post("/close-current", async (req, res) => {
   try {
-    log.info("Closing current poll and tallying results");
-
     // Get the most recent open poll
     const { data: polls, error: pollError } = await supabase
       .from("polls")
@@ -179,13 +207,18 @@ router.post("/close-current", async (req, res) => {
       .order("closes_at", { ascending: true })
       .limit(1);
 
-    if (pollError || !polls || polls.length === 0) {
-      log.info("No open polls to close");
-      return res.json({ message: "No open polls to close" });
+    if (pollError) {
+      log.error((pollError as Error).message || String(pollError), "Failed to fetch open polls");
+      return res.status(500).json({ error: "Internal server error" });
+    }
+
+    if (!polls || polls.length === 0) {
+      return res.status(404).json({ error: "No open poll found" });
     }
 
     const poll = polls[0];
-    
+    const isYesNoPoll = poll.options.length === 2 && poll.options[0] === "yes" && poll.options[1] === "no";
+
     // Get vote counts
     const { data: votes, error: voteError } = await supabase
       .from("votes")
@@ -193,91 +226,58 @@ router.post("/close-current", async (req, res) => {
       .eq("poll_id", poll.id);
 
     if (voteError) {
-      log.error((voteError as any)?.message || String(voteError), "Failed to fetch votes for poll %s", poll.id);
-      return res.status(500).json({ error: "Failed to tally votes" });
+      log.error((voteError as Error).message || String(voteError), "Failed to fetch votes");
+      return res.status(500).json({ error: "Internal server error" });
     }
 
-    const yesVotes = votes?.filter(v => v.choice === 0).length || 0;
-    const noVotes = votes?.filter(v => v.choice === 1).length || 0;
-    const totalVotes = yesVotes + noVotes;
-    
-    // Update poll to close it
-    const { error: closeError } = await supabase
-      .from("polls")
-      .update({ closes_at: new Date().toISOString() })
-      .eq("id", poll.id);
+    // Tally votes
+    const voteCounts = votes.reduce((acc, vote) => {
+      acc[vote.choice] = (acc[vote.choice] || 0) + 1;
+      return acc;
+    }, {} as Record<number, number>);
 
-    if (closeError) {
-      log.error((closeError as any)?.message || String(closeError), "Failed to close poll %s", poll.id);
-      return res.status(500).json({ error: "Failed to close poll" });
-    }
+    const totalVotes = Object.values(voteCounts).reduce((sum, count) => sum + count, 0);
+    const winner = Object.entries(voteCounts).reduce((a, b) => (b[1] > (a[1] || 0) ? b : a))[0];
 
-    const result = {
-      pollId: poll.id,
-      question: poll.question,
-      totalVotes,
-      results: {
-        yes: yesVotes,
-        no: noVotes,
-        winner: yesVotes > noVotes ? "yes" : noVotes > yesVotes ? "no" : "tie"
-      }
-    };
-
-    log.info("Poll %s closed. Results: %o", poll.id, result.results);
-
-    // Store poll results in Bootoshi Cloud for agent context
+    // Generate chapter based on poll results
     try {
-      await cloud("add", {
-        agent_id: "poll",
-        run_id: "weekly",
-        memories: `Poll closed: "${poll.question}". Results: ${yesVotes} yes, ${noVotes} no (${totalVotes} total votes). Winner: ${result.results.winner}`,
-        store_mode: "vector",
-        metadata: { 
-          ...result,
-          ts: Date.now(),
-          type: "poll_result"
+      const chapterResponse = await fetch(`${process.env.API_URL}/api/worlds/1/arcs/1/progress`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${process.env.API_TOKEN}`
         },
-        skip_extraction: true
-      });
-      log.info("Poll results saved to Bootoshi Cloud");
-
-      // Trigger chapter generation after poll closes
-      try {
-        const chapterResponse = await fetch(`${process.env.API_URL}/api/worlds/1/arcs/1/progress`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${process.env.API_TOKEN}`
+        body: JSON.stringify({
+          poll_result: {
+            question: poll.question,
+            winner: poll.options[parseInt(winner)],
+            total_votes: totalVotes
           }
-        });
+        })
+      });
 
-        if (!chapterResponse.ok) {
-          throw new Error(`Chapter generation failed: ${chapterResponse.statusText}`);
-        }
-
-        log.info("Chapter generation triggered successfully after poll closure");
-      } catch (chapterError) {
-        log.error((chapterError as any)?.message || String(chapterError), "Failed to trigger chapter generation after poll closure");
+      if (!chapterResponse.ok) {
+        throw new Error(`Chapter generation failed: ${chapterResponse.statusText}`);
       }
-    } catch (cloudError) {
-      log.error((cloudError as any)?.message || String(cloudError), "Failed to save poll results to Bootoshi Cloud");
+
+      log.info("Chapter generated successfully after poll closure");
+    } catch (chapterError) {
+      log.error((chapterError as Error).message || String(chapterError), "Failed to generate chapter");
+      return res.status(500).json({ error: "Failed to generate chapter" });
     }
 
-    // Create new poll for next week
+    // Create next poll
     try {
-      // Get the latest chapter to generate contextual options
-      const { data: latestChapter, error: chapterError } = await supabase
+      const { data: latestChapter } = await supabase
         .from("beats")
         .select("*")
         .order("authored_at", { ascending: false })
         .limit(1)
         .single();
 
-      let pollOptions;
-      let pollQuestion;
-
-      if (chapterError || !latestChapter) {
-        // First poll - use yes/no
+      let pollQuestion, pollOptions;
+      if (isYesNoPoll && !latestChapter) {
+        // First poll was yes/no and no chapters exist yet
         pollQuestion = "Should the Bald Brothers begin their quest?";
         pollOptions = ["yes", "no"];
       } else {
@@ -292,7 +292,7 @@ router.post("/close-current", async (req, res) => {
         .insert({
           question: pollQuestion,
           options: pollOptions,
-          closes_at: new Date(Date.now() + (process.env.NODE_ENV === 'production' ? 24 * 60 * 60 * 1000 : 10 * 1000))
+          closes_at: new Date(Date.now() + (process.env.NODE_ENV === 'production' ? 24 * 60 * 60 * 1000 : 30 * 1000))
         })
         .select()
         .single();
@@ -302,13 +302,21 @@ router.post("/close-current", async (req, res) => {
       }
 
       log.info("New poll created with ID %s and options %o", newPoll.id, pollOptions);
+      res.json({ 
+        poll_closed: poll.id,
+        new_poll: newPoll,
+        results: {
+          total_votes: totalVotes,
+          winner: poll.options[parseInt(winner)],
+          vote_counts: voteCounts
+        }
+      });
     } catch (newPollError) {
-      log.error((newPollError as any)?.message || String(newPollError), "Failed to create new poll");
+      log.error((newPollError as Error).message || String(newPollError), "Failed to create new poll");
+      res.status(500).json({ error: "Failed to create new poll" });
     }
-
-    res.json(result);
   } catch (error) {
-    log.error((error as any)?.message || String(error), "Error closing poll");
+    log.error((error as Error).message || String(error), "Error in poll closure");
     res.status(500).json({ error: "Internal server error" });
   }
 });

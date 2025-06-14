@@ -202,129 +202,161 @@
     countdownInterval = setInterval(updateCountdown, 1000);
     updateCountdown();
 
-    // --- POLL LOGIC ENHANCEMENT ---
-    let pollData = null;
+    // Poll and chapter state
+    let currentPoll = null;
     let pollCountdownInterval = null;
-    let postPollCountdownInterval = null;
+    let chapterCountdownInterval = null;
 
-    function loadPoll() {
-      fetch('/polls/open')
-        .then(r => r.json())
-        .then(data => {
-          pollData = data.poll;
+    // Load current poll
+    async function loadPoll() {
+      try {
+        const response = await fetch('/polls/open');
+        const data = await response.json();
+        
+        if (data.poll) {
+          currentPoll = data.poll;
           const pollDiv = document.getElementById('current-poll');
-          if (pollData) {
-            // Show poll with countdown
-            let optionsHtml = '';
-            pollData.options.forEach((opt, idx) => {
-              optionsHtml += `<button onclick=\"vote(${idx})\">${opt}</button> `;
-            });
-            pollDiv.innerHTML = `
-              <h2>Current Poll</h2>
-              <p><strong>${pollData.question}</strong></p>
-              ${optionsHtml}
-              <div id=\"poll-timer\"></div>
-              <p><small>Closes: ${new Date(pollData.closes_at).toLocaleString()}</small></p>
-            `;
-            startPollCountdown();
-          } else {
-            pollDiv.innerHTML = '<h2>No active poll</h2>';
-          }
-        });
-    }
+          const timeLeft = new Date(currentPoll.closes_at) - new Date();
+          
+          pollDiv.innerHTML = `
+            <h2>Current Poll</h2>
+            <p><strong>${currentPoll.question}</strong></p>
+            <div class="poll-options">
+              ${currentPoll.options.map((option, index) => `
+                <button onclick="vote(${index})">${option}</button>
+              `).join('')}
+            </div>
+            <p><small>Closes in: <span id="poll-countdown"></span></small></p>
+          `;
 
-    function startPollCountdown() {
-      clearInterval(pollCountdownInterval);
-      clearInterval(postPollCountdownInterval);
-      if (!pollData) return;
-      const timerDiv = document.getElementById('poll-timer');
-      function updatePollTimer() {
-        const now = new Date();
-        const closes = new Date(pollData.closes_at);
-        const diff = Math.max(0, Math.floor((closes - now) / 1000));
-        const min = Math.floor(diff / 60);
-        const sec = diff % 60;
-        timerDiv.textContent = `Poll closes in ${min}:${sec.toString().padStart(2, '0')}`;
-        if (diff <= 0) {
-          clearInterval(pollCountdownInterval);
-          showPollResults(pollData.id, true);
+          // Start poll countdown
+          startPollCountdown(timeLeft);
+        } else {
+          document.getElementById('current-poll').innerHTML = '<h2>No active poll</h2>';
         }
+      } catch (error) {
+        console.error('Error loading poll:', error);
+        document.getElementById('current-poll').innerHTML = '<h2>Error loading poll</h2>';
       }
-      updatePollTimer();
-      pollCountdownInterval = setInterval(updatePollTimer, 1000);
     }
 
+    // Start poll countdown
+    function startPollCountdown(timeLeft) {
+      if (pollCountdownInterval) clearInterval(pollCountdownInterval);
+      
+      function updateCountdown() {
+        const seconds = Math.max(0, Math.floor(timeLeft / 1000));
+        const minutes = Math.floor(seconds / 60);
+        const remainingSeconds = seconds % 60;
+        
+        document.getElementById('poll-countdown').textContent = 
+          `${minutes}:${remainingSeconds.toString().padStart(2, '0')}`;
+        
+        if (timeLeft <= 0) {
+          clearInterval(pollCountdownInterval);
+          closePoll();
+        }
+        timeLeft -= 1000;
+      }
+      
+      updateCountdown();
+      pollCountdownInterval = setInterval(updateCountdown, 1000);
+    }
+
+    // Vote function
     async function vote(choice) {
-      const polls = await fetch('/polls/open').then(r => r.json());
-      if (polls.poll) {
-        fetch(`/polls/${polls.poll.id}/vote`, {
+      if (!currentPoll) return;
+      
+      try {
+        const response = await fetch(`/polls/${currentPoll.id}/vote`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ choice })
-        }).then(() => {
-          // After voting, show results and a thank you message, then auto-refresh
-          showPollResults(polls.poll.id, true, true); // pass thankYou flag
         });
+
+        if (!response.ok) throw new Error('Failed to submit vote');
+        
+        // Show thank you message and start chapter countdown
+        document.getElementById('current-poll').innerHTML = `
+          <h2>Thank you for voting!</h2>
+          <p>Generating next chapter...</p>
+          <div id="chapter-countdown"></div>
+        `;
+        
+        startChapterCountdown();
+      } catch (error) {
+        console.error('Error submitting vote:', error);
+        alert('Failed to submit vote. Please try again.');
       }
     }
 
-    // Show poll results (vote counts per option)
-    function showPollResults(pollId, autoRefresh, thankYou) {
-      fetch(`/polls/${pollId}/results`)
-        .then(r => r.json())
-        .then(data => {
-          fetch('/polls/open').then(r => r.json()).then(polls => {
-            const poll = polls.poll;
-            let resultsHtml = `<h2>Poll Results</h2>`;
-            if (poll) {
-              resultsHtml += `<p><strong>${poll.question}</strong></p>`;
-            }
-            if (thankYou) {
-              resultsHtml += `<div style='color:#ffe600;font-weight:bold;margin-bottom:1em;'>Thank you for voting!</div>`;
-            }
-            resultsHtml += '<ul>';
-            data.results.forEach(r => {
-              resultsHtml += `<li>${r.option}: ${r.count} vote${r.count !== 1 ? 's' : ''}</li>`;
-            });
-            resultsHtml += '</ul>';
-            // Show a post-poll countdown before auto-refresh
-            resultsHtml += `<div id=\"post-poll-timer\" style=\"margin-top:1rem;font-size:1.2rem;\"></div>`;
-            document.getElementById('current-poll').innerHTML = resultsHtml;
-            if (autoRefresh) {
-              let postCountdown = 10;
-              const postTimerDiv = document.getElementById('post-poll-timer');
-              function updatePostTimer() {
-                postTimerDiv.textContent = `Next chapter in ${postCountdown}s...`;
-                if (postCountdown <= 0) {
-                  clearInterval(postPollCountdownInterval);
-                  fetchAndDisplayLatestChapter();
-                }
-                postCountdown--;
-              }
-              updatePostTimer();
-              postPollCountdownInterval = setInterval(updatePostTimer, 1000);
-            }
-          });
-        });
-    }
-    // --- END POLL LOGIC ENHANCEMENT ---
-
-    // --- CHAPTER FETCHING ---
-    async function fetchAndDisplayLatestChapter() {
-      try {
-        // Try to fetch the latest chapter from the backend
-        const res = await fetch('/api/beats/latest');
-        if (!res.ok) throw new Error('Failed to fetch latest chapter');
-        const data = await res.json();
-        if (data && data.body) {
-          storyHeading.textContent = data.title || 'Latest Chapter';
-          chapterContent.style.display = 'block';
-          chapterContent.innerHTML = `<p>${data.body}</p>`;
+    // Start chapter countdown
+    function startChapterCountdown() {
+      let timeLeft = 30; // 30 seconds for chapter generation
+      
+      function updateCountdown() {
+        document.getElementById('chapter-countdown').textContent = 
+          `Next chapter in ${timeLeft} seconds...`;
+        
+        if (timeLeft <= 0) {
+          clearInterval(chapterCountdownInterval);
+          fetchLatestChapter();
         }
-      } catch (err) {
-        chapterContent.innerHTML = '<p>Unable to load latest chapter.</p>';
+        timeLeft--;
+      }
+      
+      updateCountdown();
+      chapterCountdownInterval = setInterval(updateCountdown, 1000);
+    }
+
+    // Fetch latest chapter
+    async function fetchLatestChapter() {
+      try {
+        const response = await fetch('/api/beats/latest');
+        if (!response.ok) throw new Error('Failed to fetch chapter');
+        
+        const data = await response.json();
+        if (data && data.body) {
+          document.getElementById('story-heading').textContent = data.title || 'Latest Chapter';
+          document.getElementById('chapter-content').style.display = 'block';
+          document.getElementById('chapter-content').innerHTML = `<p>${data.body}</p>`;
+          
+          // Load next poll
+          loadPoll();
+        }
+      } catch (error) {
+        console.error('Error fetching chapter:', error);
+        document.getElementById('chapter-content').innerHTML = 
+          '<p>Unable to load latest chapter. Please refresh the page.</p>';
       }
     }
+
+    // Close current poll
+    async function closePoll() {
+      try {
+        const response = await fetch('/polls/close-current', { method: 'POST' });
+        if (!response.ok) throw new Error('Failed to close poll');
+        
+        const data = await response.json();
+        console.log('Poll closed:', data);
+        
+        // Start chapter generation countdown
+        document.getElementById('current-poll').innerHTML = `
+          <h2>Poll Closed</h2>
+          <p>Generating next chapter...</p>
+          <div id="chapter-countdown"></div>
+        `;
+        
+        startChapterCountdown();
+      } catch (error) {
+        console.error('Error closing poll:', error);
+        document.getElementById('current-poll').innerHTML = 
+          '<h2>Error closing poll</h2>';
+      }
+    }
+
+    // Initial load
+    loadPoll();
   </script>
 </body>
 </html> 
