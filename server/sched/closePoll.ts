@@ -1,7 +1,25 @@
 import cron from "node-cron";
 import { createClient } from "@supabase/supabase-js";
+import winston from 'winston';
 import { cloud } from "../../src/lib/cloudClient";
-const log = require("pino")();
+import { ChapterAgent } from "../../src/agents/chapterAgent";
+
+/**
+ * Winston logger configuration for consistent, robust logging.
+ */
+const log = winston.createLogger({
+  level: 'info',
+  format: winston.format.combine(
+    winston.format.timestamp(),
+    winston.format.printf((info) => {
+      const { timestamp, level, message, ...meta } = info as { timestamp: string; level: string; message: string };
+      return `${timestamp} [${level.toUpperCase()}]: ${message} ${Object.keys(meta).length ? JSON.stringify(meta) : ''}`;
+    })
+  ),
+  transports: [
+    new winston.transports.Console(),
+  ],
+});
 
 // Initialize Supabase client
 const supabase = createClient(
@@ -9,9 +27,40 @@ const supabase = createClient(
   process.env.SUPABASE_ANON_KEY!
 );
 
+/**
+ * Helper to generate story poll options based on the latest chapter content.
+ * Falls back to a default question if generation fails or no chapter exists.
+ * @param {string} chapterContent - The latest chapter body
+ * @returns {Promise<{question: string, choices: string[]}>}
+ */
+async function generateStoryOptions(chapterContent: string) {
+  try {
+    // Use the ChapterAgent to generate two different story options
+    const result = await ChapterAgent.run(`Based on this chapter:\n"${chapterContent}"\n\nGenerate two different story options for the next chapter. One should be a darker turn, and one should be more focused on the Bald Brothers' journey. Format the response as:{\n  \"question\": \"What path should the Bald Brothers take?\",\n  \"choices\": [\"Option 1\", \"Option 2\"]\n}`);
+    if (!result.success) throw new Error("Failed to generate story options");
+    const options = JSON.parse(result.output as string);
+    return { question: options.question, choices: options.choices };
+  } catch (error) {
+    log.error((error as any)?.message || String(error), "Failed to generate story options");
+    // Fallback options if generation fails
+    return {
+      question: "What path should the Bald Brothers take?",
+      choices: [
+        "Seek the ancient bald scrolls in the dark temple",
+        "Train with the wise bald masters in the mountains"
+      ]
+    };
+  }
+}
+
+/**
+ * Closes the current poll, tallies votes, stores results, triggers chapter generation,
+ * and creates the next poll. This ensures a continuous poll-chapter branching loop.
+ * All major steps are logged for robust observability.
+ */
 export async function closePollAndTally() {
   try {
-    log.info("Starting scheduled poll closure and tally");
+    log.info("[Scheduler] Starting scheduled poll closure and tally");
 
     // Get the most recent open poll
     const { data: polls, error: pollError } = await supabase
@@ -22,47 +71,44 @@ export async function closePollAndTally() {
       .limit(1);
 
     if (pollError) {
-      log.error(pollError, "Failed to fetch open polls");
+      log.error((pollError as any)?.message || String(pollError), "Failed to fetch open polls");
       return;
     }
 
     if (!polls || polls.length === 0) {
-      log.info("No open polls to close");
+      log.info("[Scheduler] No open polls to close");
       return;
     }
 
     const poll = polls[0];
-    log.info("Closing poll %s: %s", poll.id, poll.question);
+    log.info(`[Scheduler] Closing poll ${poll.id}: ${poll.question}`);
 
-    // Get vote counts
+    // Get vote counts for each option
     const { data: votes, error: voteError } = await supabase
       .from("votes")
       .select("choice")
       .eq("poll_id", poll.id);
 
     if (voteError) {
-      log.error(voteError, "Failed to fetch votes for poll %s", poll.id);
+      log.error((voteError as any)?.message || String(voteError), `Failed to fetch votes for poll ${poll.id}`);
       return;
     }
 
-    // Get vote counts for each option (dynamic)
     const options: string[] = poll.options;
     const counts = options.map((opt: string, idx: number) => ({
       option: opt,
       count: votes.filter((v: { choice: number }) => v.choice === idx).length
     }));
     const totalVotes = votes.length;
-    // Optionally, determine winner (option with most votes)
     const winner = counts.reduce((max, curr) => curr.count > max.count ? curr : max, counts[0]);
-    
-    // Update poll to close it
+
+    // Close the poll in the DB
     const { error: closeError } = await supabase
       .from("polls")
       .update({ closes_at: new Date().toISOString() })
       .eq("id", poll.id);
-
     if (closeError) {
-      log.error(closeError, "Failed to close poll %s", poll.id);
+      log.error((closeError as any)?.message || String(closeError), `Failed to close poll ${poll.id}`);
       return;
     }
 
@@ -73,46 +119,106 @@ export async function closePollAndTally() {
       results: counts,
       winner: winner.option
     };
-
-    log.info("Poll %s closed. Results: %o", poll.id, result.results);
+    log.info(`[Scheduler] Poll ${poll.id} closed. Results: ${JSON.stringify(result.results)}`);
 
     // Store poll results in Bootoshi Cloud for agent context
     try {
       await cloud("add", {
         agent_id: "poll",
         run_id: "weekly",
-        memories: `Poll closed: "${poll.question}". Results: ${JSON.stringify(result.results)}. Winner: ${result.winner}`,
+        memories: `Poll closed: \"${poll.question}\". Results: ${JSON.stringify(result.results)}. Winner: ${result.winner}`,
         store_mode: "vector",
-        metadata: { 
+        metadata: {
           ...result,
           ts: Date.now(),
           type: "poll_result"
         },
         skip_extraction: true
       });
-      log.info("Poll results saved to Bootoshi Cloud");
+      log.info("[Scheduler] Poll results saved to Bootoshi Cloud");
     } catch (cloudError) {
-      log.error(cloudError, "Failed to save poll results to Bootoshi Cloud");
+      log.error((cloudError as any)?.message || String(cloudError), "Failed to save poll results to Bootoshi Cloud");
     }
 
-    // TODO: Create new poll for next week
-    // This could be enhanced to automatically generate a new poll question
-    // based on the story context or current events
-    
+    // Trigger chapter generation after poll closes
+    try {
+      log.info("[Scheduler] Triggering chapter generation after poll closure");
+      const chapterResponse = await fetch(`${process.env.API_URL}/api/worlds/1/arcs/1/progress`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${process.env.API_TOKEN}`
+        }
+      });
+      if (!chapterResponse.ok) {
+        throw new Error(`Chapter generation failed: ${chapterResponse.statusText}`);
+      }
+      log.info("[Scheduler] Chapter generation triggered successfully after poll closure");
+    } catch (chapterError) {
+      log.error((chapterError as any)?.message || String(chapterError), "Failed to trigger chapter generation after poll closure");
+    }
+
+    // Create the next poll for the next chapter
+    try {
+      // Get the latest chapter to generate contextual options
+      const { data: latestChapter, error: chapterError } = await supabase
+        .from("beats")
+        .select("*")
+        .order("authored_at", { ascending: false })
+        .limit(1)
+        .single();
+
+      let pollOptions;
+      let pollQuestion;
+
+      if (chapterError || !latestChapter) {
+        // First poll - use yes/no
+        pollQuestion = "Should the Bald Brothers begin their quest?";
+        pollOptions = ["yes", "no"];
+        log.info("[Scheduler] No chapter found, using default yes/no poll");
+      } else {
+        // Generate two different story options based on the latest chapter
+        const options = await generateStoryOptions(latestChapter.body);
+        pollQuestion = options.question;
+        pollOptions = options.choices;
+        log.info("[Scheduler] Generated new poll options from latest chapter");
+      }
+
+      // Always use 10s poll duration for now (testing)
+      const pollDuration = 10 * 1000;
+      const { data: newPoll, error: newPollError } = await supabase
+        .from("polls")
+        .insert({
+          question: pollQuestion,
+          options: pollOptions,
+          closes_at: new Date(Date.now() + pollDuration)
+        })
+        .select()
+        .single();
+
+      if (newPollError) {
+        throw newPollError;
+      }
+      log.info(`[Scheduler] New poll created with ID ${newPoll.id} and options ${JSON.stringify(pollOptions)}`);
+    } catch (newPollError) {
+      log.error((newPollError as any)?.message || String(newPollError), "Failed to create new poll");
+    }
   } catch (error) {
-    log.error(error, "Error in scheduled poll closure");
+    log.error((error as any)?.message || String(error), "Error in scheduled poll closure");
   }
 }
 
-// Schedule the poll closure job to run every Saturday at 23:59 UTC
+/**
+ * Starts the poll scheduler to close polls and create new ones every 10 seconds (testing mode).
+ * This ensures the poll-chapter loop is always running.
+ */
 export function startPollScheduler() {
-  // TEMP: Always run every 10 seconds for testing, regardless of environment
   log.info("🤖🦾 [AI DEBUG] If you see this, the AI overlords have hijacked your poll scheduler! Polls will close every 10 seconds. Resistance is futile. [session:" + Date.now() + "]");
   cron.schedule("*/10 * * * * *", async () => {
-    log.info("Triggered scheduled poll closure (testing, every 10s)");
+    log.info("[Scheduler] Triggered scheduled poll closure (every 10s)");
     await closePollAndTally();
   });
-  log.info("Poll scheduler started - will close polls every 10 seconds (testing mode)");
+  log.info("[Scheduler] Poll scheduler started - will close polls every 10 seconds (testing mode)");
 }
 
 // Allow manual execution for testing
@@ -122,7 +228,7 @@ if (require.main === module) {
     log.info("Manual poll closure completed");
     process.exit(0);
   }).catch((error) => {
-    log.error(error, "Manual poll closure failed");
+    log.error((error as any)?.message || String(error), "Manual poll closure failed");
     process.exit(1);
   });
 }
