@@ -31,35 +31,6 @@ const log = winston.createLogger({
 // Ensure poll durations are at least 30s in dev/test
 const pollDuration = process.env.NODE_ENV === 'production' ? 24 * 60 * 60 * 1000 : 30 * 1000;
 
-// Create initial yes/no poll if no chapters exist
-async function createInitialPoll() {
-  const { data: chapters } = await supabase
-    .from("beats")
-    .select("*")
-    .limit(1);
-
-  if (!chapters || chapters.length === 0) {
-    const { data: newPoll, error } = await supabase
-      .from("polls")
-      .insert({
-        question: "Should the Bald Brothers begin their quest?",
-        options: ["yes", "no"],
-        closes_at: new Date(Date.now() + pollDuration)
-      })
-      .select()
-      .single();
-
-    if (error) {
-      log.error((error as Error).message || String(error), "Failed to create initial poll");
-      return null;
-    }
-
-    log.info("Created initial yes/no poll with ID %s", newPoll.id);
-    return newPoll;
-  }
-  return null;
-}
-
 // Get the currently open poll
 router.get("/open", async (req, res) => {
   try {
@@ -76,10 +47,9 @@ router.get("/open", async (req, res) => {
       return res.status(500).json({ error: "Internal server error" });
     }
 
-    // If no open poll exists, create initial yes/no poll if no chapters exist
+    // If no open poll exists, just return null (do not create any poll here)
     if (!polls || polls.length === 0) {
-      const initialPoll = await createInitialPoll();
-      return res.json({ poll: initialPoll });
+      return res.json({ poll: null });
     }
 
     res.json({ poll: polls[0] });

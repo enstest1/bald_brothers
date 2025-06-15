@@ -59,7 +59,7 @@ async function createTwoChoicePoll(): Promise<void> {
         }
     } catch (e) { log.error(e, "[Scheduler] Error generating AI poll options, using fallback."); }
 
-    const { data: newPoll } = await supabase.from("polls").insert({ question, options: choices, closes_at: new Date(Date.now() + 40000) }).select("id").single();
+    const { data: newPoll } = await supabase.from("polls").insert({ question, options: choices, closes_at: new Date(Date.now() + 120000) }).select("id").single();
     if (newPoll) {
         log.info(`[Scheduler] New two-choice poll created with ID ${newPoll.id}`);
     } else {
