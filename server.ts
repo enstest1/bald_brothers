@@ -116,7 +116,7 @@ app.listen(PORT, async () => {
   await ensureFirstPoll();
   
   // Log configuration status
-  const requiredEnvVars = ["CLOUD_URL", "CLOUD_PASSWORD", "SUPABASE_URL", "SUPABASE_ANON_KEY", "OPENROUTER_API_KEY"];
+  const requiredEnvVars = ["SUPABASE_URL", "SUPABASE_ANON_KEY", "OPENROUTER_API_KEY"];
   const missingVars = requiredEnvVars.filter(varName => !process.env[varName]);
   
   if (missingVars.length > 0) {

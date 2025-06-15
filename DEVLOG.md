@@ -14,6 +14,19 @@ The Bald Brothers Story Engine is a sophisticated story generation system that a
 
 ## Recent Changes and Fixes
 
+### 2024-06-14: Scheduler, Poll, and Chapter Generation Robustness
+- Fixed aggressive backend poll scheduler (was running every 10s with an artificial 60s delay, causing server overload and unresponsiveness).
+- Removed unnecessary setTimeout delay in the cron callback.
+- Set scheduler interval to 35 seconds for dev/test to prevent overlapping executions and reduce server load.
+- Added a lock (`isProcessingPollClosure`) to prevent concurrent executions of `closePollAndTally`.
+- Improved logging for scheduler events and poll closure.
+- Fixed database insert errors by removing the `title` field from chapter inserts (matches `beats` table schema).
+- Ensured fallback chapter body is always set if AI agent fails or returns empty output.
+- Now, after every poll closes, a chapter is always generated and saved, and the server remains responsive.
+- Frontend and backend are now in sync: after voting, a new chapter is always saved and displayed.
+- Error about the `title` column is resolved, and the story engine works as intended.
+- **What worked:** The lock and longer scheduler interval stopped server overload. Removing the `title` field fixed DB errors. Fallback logic ensures the story always continues, even if the AI fails.
+
 ### 1. Poll System Enhancements
 - Added vote count display for poll options
 - Implemented dynamic poll options based on user votes

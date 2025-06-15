@@ -10,6 +10,7 @@ const supabase = createClient(
 
 export const ChapterAgent = new FeatherAgent({
   model: "openai/gpt-4o-mini",
+  // max_tokens is not a valid property for FeatherAgent config; control token usage in prompt or agent config if supported
   systemPrompt: `You are the Bald Brothers Scribe, a master storyteller tasked with continuing the epic saga of the Bald Brothers. Your role is to generate compelling, engaging chapters that build upon the existing lore and narrative threads.
 
 Guidelines:
@@ -87,38 +88,30 @@ You have access to tools to retrieve recent story context and save new chapters.
         parameters: {
           type: "object",
           properties: {
-            title: {
-              type: "string",
-              description: "The chapter title"
-            },
             body: {
               type: "string",
               description: "The chapter content"
             }
           },
-          required: ["title", "body"]
+          required: ["body"]
         }
       },
       execute: async (args: Record<string, any>) => {
-        const { title, body } = args as { title: string; body: string };
-        log.info("Saving new chapter: %s", title);
-        
+        const { body } = args as { body: string };
+        log.info("Saving new chapter via agent tool");
         const { data, error } = await supabase
           .from("beats")
           .insert({
             arc_id: "1", // Main story arc
-            title,
             body,
             authored_at: new Date()
           })
           .select()
           .single();
-        
         if (error) {
           log.error((error as Error).message || String(error), "Failed to save chapter");
           throw error;
         }
-        
         return data;
       }
     }

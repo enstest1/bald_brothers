@@ -57,21 +57,24 @@ async function generateStoryOptions(chapterContent: string) {
 }
 
 // Helper to save a chapter with validation and fallback
-async function saveChapterWithValidation(chapterData: { body?: string, title?: string }) {
+async function saveChapterWithValidation(chapterData: { body?: string }) {
   let body = chapterData?.body;
-  let title = chapterData?.title || 'Untitled Chapter';
   if (!body || typeof body !== 'string' || body.trim().length < 10) {
     // Fallback content
     body = 'The Bald Brothers continue their journey, but the details are lost to legend. The story will resume with the next decision.';
-    title = 'A Lost Chapter';
     log.warn('[Scheduler] Chapter generation failed, using fallback content.');
   }
-  const { error } = await supabase.from('beats').insert({ arc_id: '1', body, title, authored_at: new Date() });
+  const { error } = await supabase.from('beats').insert({
+    arc_id: '1',
+    body,
+    authored_at: new Date()
+  });
   if (error) {
     log.error((error as any)?.message || String(error), 'Failed to save chapter');
-  } else {
-    log.info(`[Scheduler] Chapter saved: ${title}`);
+    return false; // Indicate failure
   }
+  log.info(`[Scheduler] Chapter saved successfully.`);
+  return true; // Indicate success
 }
 
 /**
@@ -233,12 +236,12 @@ export async function closePollAndTally() {
         if (!chapterResponse.ok) {
           throw new Error(`Chapter generation failed: ${chapterResponse.statusText}`);
         }
-        const chapterData = await chapterResponse.json() as unknown as { body?: string, title?: string };
+        const chapterData = await chapterResponse.json() as unknown as { body?: string };
         await saveChapterWithValidation(chapterData);
       } catch (chapterError) {
         log.error((chapterError as any)?.message || String(chapterError), "Failed to generate first chapter after yes/no poll");
         // Fallback: save a default chapter
-        await saveChapterWithValidation({ body: '', title: '' });
+        await saveChapterWithValidation({ body: '' });
       }
       // Now create the first two-choice poll
       const { data: latestChapter, error: chapterError } = await supabase
@@ -288,7 +291,7 @@ export async function closePollAndTally() {
         if (!chapterResponse.ok) {
           throw new Error(`Chapter generation failed: ${chapterResponse.statusText}`);
         }
-        const chapterData = await chapterResponse.json() as unknown as { body?: string, title?: string };
+        const chapterData = await chapterResponse.json() as unknown as { body?: string };
         await saveChapterWithValidation(chapterData);
         // Confirm chapter is saved in DB
         const { data: latestChapter, error: chapterError } = await supabase
@@ -305,7 +308,7 @@ export async function closePollAndTally() {
       } catch (chapterError) {
         log.error((chapterError as any)?.message || String(chapterError), "Failed to generate or save chapter");
         // Fallback: save a default chapter
-        await saveChapterWithValidation({ body: '', title: '' });
+        await saveChapterWithValidation({ body: '' });
       }
       if (!chapterSaved) {
         log.error("[Scheduler] Aborting poll creation: chapter not confirmed saved.");
