@@ -83,13 +83,13 @@ async function ensureFirstPoll() {
   }
 
   if (!polls || polls.length === 0) {
-    log.info("[INIT] No open polls found. Creating the first poll...");
-    const pollDuration = 10 * 1000; // 10 seconds for testing
+    log.info("[INIT] No open polls found. Creating an initial poll...");
+    const pollDuration = 30 * 1000; // 30 seconds for testing
     const { data, error: createError } = await supabase
       .from("polls")
       .insert({
-        question: "Should the Bald Brothers start a new adventure?",
-        options: ["yes", "no"],
+        question: "Should the Bald Brothers begin their epic quest?",
+        options: ["Yes, the saga must begin!", "No, let them rest."],
         closes_at: new Date(Date.now() + pollDuration)
       })
       .select()

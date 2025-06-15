@@ -137,13 +137,18 @@
     const chapterContent = document.getElementById('chapter-content');
     const currentPollDiv = document.getElementById('current-poll');
 
-    let currentPoll = null;
+    let currentPollId = null;
     let pollCheckInterval = null;
 
     // --- State Rendering Functions ---
 
-    function renderLoadingPoll() {
-        currentPollDiv.innerHTML = '<h2>Searching for the next path...</h2><p><small>The fates are aligning.</small></p>';
+    function renderLoadingState(section) {
+        if (section === 'story') {
+            storyHeading.textContent = 'Loading The Saga...';
+            chapterContent.innerHTML = '<p>The chronicles of the Bald Brotherhood are being transcribed...</p>';
+        } else if (section === 'poll') {
+            currentPollDiv.innerHTML = '<h2>Searching for the next path...</h2><p><small>The fates are aligning.</small></p>';
+        }
     }
 
     function renderPoll(poll) {
@@ -160,24 +165,11 @@
     }
 
     function renderVotedState() {
-        let countdown = 15;
         currentPollDiv.innerHTML = `
             <h2>Thank you for voting!</h2>
             <p>The Bald Brothers' destiny is being forged...</p>
-            <p>Generating next chapter...</p>
-            <div id="next-chapter-countdown">Next chapter in ${countdown} seconds...</div>
+            <p>A new chapter is being written.</p>
         `;
-        const countdownElement = document.getElementById('next-chapter-countdown');
-        const voteInterval = setInterval(() => {
-            countdown--;
-            if (countdownElement) {
-                countdownElement.textContent = `Next chapter in ${countdown} seconds...`;
-            }
-            if (countdown <= 0) {
-                clearInterval(voteInterval);
-                initialize(); // Re-initialize the app to fetch new state
-            }
-        }, 1000);
     }
     
     // --- Core Logic ---
@@ -190,7 +182,7 @@
                 storyHeading.textContent = 'The Story Begins...';
                 chapterContent.innerHTML = `<p>${data.body || "The chronicles are about to be written..."}</p>`;
             } else {
-                storyHeading.textContent = data.title;
+                storyHeading.textContent = data.title || "A New Chapter Unfolds";
                 chapterContent.innerHTML = `<p>${data.body.replace(/\n/g, '<br>')}</p>`;
             }
         } catch (error) {
@@ -205,13 +197,17 @@
             const response = await fetch('/polls/open');
             const data = await response.json();
             
-            if (data.poll && data.poll.id !== currentPoll?.id) {
+            // If a new, different poll is available, display it.
+            if (data.poll && data.poll.id !== currentPollId) {
+                console.log(`New poll found: ${data.poll.id}`);
                 if (pollCheckInterval) clearInterval(pollCheckInterval);
                 pollCheckInterval = null;
-                currentPoll = data.poll;
-                renderPoll(currentPoll);
+                currentPollId = data.poll.id;
+                renderPoll(data.poll);
             } else if (!data.poll && !pollCheckInterval) {
-                renderLoadingPoll();
+                // If no poll is active, start checking every 5 seconds.
+                console.log('No active poll. Starting polling interval.');
+                renderLoadingState('poll');
                 pollCheckInterval = setInterval(fetchOpenPoll, 5000);
             }
         } catch (error) {
@@ -221,32 +217,43 @@
     }
 
     async function vote(choiceIndex) {
-        if (!currentPoll) return;
+        if (!currentPollId) return;
         
-        // Disable buttons after voting
-        const buttons = currentPollDiv.querySelectorAll('button');
-        buttons.forEach(button => button.disabled = true);
+        const pollIdToVoteOn = currentPollId;
+        currentPollId = null; // Prevent re-voting on the same poll
+        renderVotedState();
 
         try {
-            await fetch(`/polls/${currentPoll.id}/vote`, {
+            await fetch(`/polls/${pollIdToVoteOn}/vote`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ choice: choiceIndex })
             });
-            renderVotedState();
+
+            // After voting, wait a moment then start looking for the next chapter and poll.
+            setTimeout(() => {
+                initialize();
+            }, 5000); // Start checking for new state after 5 seconds
+
         } catch (error) {
             console.error('Error submitting vote:', error);
             alert('Failed to submit vote. Please try again.');
-            buttons.forEach(button => button.disabled = false); // Re-enable buttons on failure
+            // Re-initialize to try again
+            initialize();
         }
     }
 
     // --- Initial Load ---
 
     function initialize() {
+        console.log("Initializing UI state...");
         fetchLatestChapter();
         fetchOpenPoll();
     }
+
+    // Remove the initial static countdown div if it exists
+    const initialCountdownDiv = document.getElementById('countdown');
+    if(initialCountdownDiv) initialCountdownDiv.style.display = 'none';
 
     initialize();
   </script>
