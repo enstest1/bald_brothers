@@ -176,39 +176,48 @@
 
     // --- Core Logic ---
     async function fetchLatestChapter() {
-        // Add a cache-busting parameter to ensure we get the latest data
-        const response = await fetch(`/api/beats/latest?t=${new Date().getTime()}`);
-        const data = await response.json();
-        if (response.ok) {
-            storyHeading.textContent = data.title || "A New Chapter Unfolds";
-            chapterContent.innerHTML = `<p>${data.body.replace(/\n/g, '<br>')}</p>`;
-        } else {
-            storyHeading.textContent = 'The Story Begins...';
-            chapterContent.innerHTML = `<p>${data.body || "The chronicles are about to be written..."}</p>`;
+        try {
+            // Add a cache-busting query parameter to the URL
+            const response = await fetch(`/api/beats/latest?t=${new Date().getTime()}`);
+            const data = await response.json();
+            if (response.ok) {
+                storyHeading.textContent = data.title || "A New Chapter Unfolds";
+                chapterContent.innerHTML = `<p>${data.body.replace(/\n/g, '<br>')}</p>`;
+            } else {
+                storyHeading.textContent = 'The Story Begins...';
+                chapterContent.innerHTML = `<p>${data.body || "The chronicles are about to be written..."}</p>`;
+            }
+        } catch (error) {
+            storyHeading.textContent = 'Error Loading Story';
+            chapterContent.innerHTML = '<p>Could not load the latest chapter. Please refresh the page.</p>';
         }
     }
 
     async function fetchOpenPoll() {
-        const response = await fetch('/polls/open');
-        const data = await response.json();
-        if (data.poll) {
-            renderPoll(data.poll);
-        } else {
-            renderLoadingState('poll');
-            // If no poll, check again after a delay
-            setTimeout(fetchOpenPoll, 7000);
+        try {
+            // Add a cache-busting query parameter to the URL
+            const response = await fetch(`/polls/open?t=${new Date().getTime()}`);
+            const data = await response.json();
+            if (data.poll) {
+                renderPoll(data.poll);
+            } else {
+                renderLoadingState('poll');
+                setTimeout(fetchOpenPoll, 7000); // If no poll, check again in 7s
+            }
+        } catch (error) {
+            currentPollDiv.innerHTML = '<h2>Error loading poll.</h2>';
         }
     }
 
     async function vote(choiceIndex, pollId) {
-        // 1. Show "Thank you" message
+        // Show "Thank you" message
         currentPollDiv.innerHTML = `
             <h2>Thank you for voting!</h2>
             <p>The Bald Brothers' destiny is being forged...</p>
             <p>The page will update with the new chapter shortly.</p>
         `;
 
-        // 2. Send the vote
+        // Send the vote
         try {
             await fetch(`/polls/${pollId}/vote`, {
                 method: 'POST',
@@ -216,15 +225,14 @@
                 body: JSON.stringify({ choice: choiceIndex })
             });
         } catch(e) {
-            console.error("Vote failed:", e);
             alert("Your vote could not be cast. Please try again.");
             initialize();
             return;
         }
 
-        // 3. Wait 40 seconds for the backend to complete its cycle, then force reload.
+        // Wait for the backend to complete its cycle, then force a reload.
         setTimeout(() => {
-            location.reload();
+            location.reload(true); // 'true' forces a reload from the server, ignoring cache
         }, 40000); 
     }
 
