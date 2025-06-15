@@ -2213,139 +2213,6 @@ router.get("/beats/latest", async (req, res) => {
 export default router;
 </file>
 
-<file path="server.ts">
-import express from "express";
-import cookieParser from "cookie-parser";
-import "dotenv/config";
-import chaptersRouter from "./server/routes/chapters";
-import pollsRouter from "./server/routes/polls";
-import { startPollScheduler } from "./server/sched/closePoll";
-import { createClient } from "@supabase/supabase-js";
-const log = require("pino")();
-
-const app = express();
-const PORT = process.env.PORT || 3000;
-
-// Middleware
-app.use(express.json());
-app.use(cookieParser());
-app.use(express.static("public")); // Serve static files
-
-// Security middleware for API endpoints
-const authenticateAPI = (req: express.Request, res: express.Response, next: express.NextFunction) => {
-  // Skip authentication for GET requests to polls (public viewing)
-  if (req.method === "GET" && req.path.startsWith("/polls")) {
-    return next();
-  }
-
-  const token = req.headers.authorization?.replace("Bearer ", "") || req.headers["x-api-token"];
-  const expectedToken = process.env.API_TOKEN;
-
-  if (!expectedToken) {
-    log.warn("API_TOKEN not configured - API endpoints are unprotected");
-    return next();
-  }
-
-  if (!token || token !== expectedToken) {
-    log.warn("Unauthorized API access attempt from %s", req.ip);
-    return res.status(401).json({ error: "Unauthorized" });
-  }
-
-  next();
-};
-
-// Routes
-app.use("/api", authenticateAPI as express.RequestHandler);
-app.use("/api", chaptersRouter);
-app.use("/polls", pollsRouter);
-
-// Health check endpoint
-app.get("/health", (req, res) => {
-  res.json({ 
-    status: "ok", 
-    timestamp: new Date().toISOString(),
-    version: "1.0.0"
-  });
-});
-
-// Root endpoint
-app.get("/", (req, res) => {
-  res.sendFile("index.html", { root: "public" });
-});
-
-// Error handling middleware
-app.use((err: Error, req: express.Request, res: express.Response, next: express.NextFunction) => {
-  log.error(err, "Unhandled error in request");
-  res.status(500).json({ error: "Internal server error" });
-});
-
-const supabase = createClient(
-  process.env.SUPABASE_URL!,
-  process.env.SUPABASE_ANON_KEY!
-);
-
-async function ensureFirstPoll() {
-  log.info("[INIT] Checking for open polls on startup...");
-  const { data: polls, error } = await supabase
-    .from("polls")
-    .select("*")
-    .gt("closes_at", new Date().toISOString())
-    .order("closes_at", { ascending: true })
-    .limit(1);
-
-  if (error) {
-    log.error("[INIT] Error checking for open polls: %s", error.message || error);
-    return;
-  }
-
-  if (!polls || polls.length === 0) {
-    log.info("[INIT] No open polls found. Creating the first poll...");
-    const pollDuration = 10 * 1000; // 10 seconds for testing
-    const { data, error: createError } = await supabase
-      .from("polls")
-      .insert({
-        question: "Should the Bald Brothers start a new adventure?",
-        options: ["yes", "no"],
-        closes_at: new Date(Date.now() + pollDuration)
-      })
-      .select()
-      .single();
-    if (createError) {
-      log.error("[INIT] Failed to create first poll: %s", createError.message || createError);
-    } else {
-      log.info("[INIT] First poll created with ID %s", data.id);
-    }
-  } else {
-    log.info("[INIT] Open poll already exists with ID %s", polls[0].id);
-  }
-}
-
-// Start server
-app.listen(PORT, async () => {
-  log.info("Bald Brothers Story Engine server started on port %d", PORT);
-  log.info("Environment: %s", process.env.NODE_ENV || "development");
-  
-  // Start the poll scheduler
-  startPollScheduler();
-  
-  // Ensure the first poll exists
-  await ensureFirstPoll();
-  
-  // Log configuration status
-  const requiredEnvVars = ["SUPABASE_URL", "SUPABASE_ANON_KEY", "OPENROUTER_API_KEY"];
-  const missingVars = requiredEnvVars.filter(varName => !process.env[varName]);
-  
-  if (missingVars.length > 0) {
-    log.warn("Missing required environment variables: %s", missingVars.join(", "));
-    log.info("Please check your .env file against .env.example");
-  } else {
-    log.info("All required environment variables are configured");
-  }
-});
-
-export default app;
-</file>
-
 <file path="src/components/Poll.tsx">
 import React, { useState, useEffect } from 'react';
 
@@ -2549,6 +2416,139 @@ export function Poll() {
     </div>
   );
 }
+</file>
+
+<file path="server.ts">
+import express from "express";
+import cookieParser from "cookie-parser";
+import "dotenv/config";
+import chaptersRouter from "./server/routes/chapters";
+import pollsRouter from "./server/routes/polls";
+import { startPollScheduler } from "./server/sched/closePoll";
+import { createClient } from "@supabase/supabase-js";
+const log = require("pino")();
+
+const app = express();
+const PORT = process.env.PORT || 3000;
+
+// Middleware
+app.use(express.json());
+app.use(cookieParser());
+app.use(express.static("public")); // Serve static files
+
+// Security middleware for API endpoints
+const authenticateAPI = (req: express.Request, res: express.Response, next: express.NextFunction) => {
+  // Skip authentication for GET requests to polls (public viewing)
+  if (req.method === "GET" && req.path.startsWith("/polls")) {
+    return next();
+  }
+
+  const token = req.headers.authorization?.replace("Bearer ", "") || req.headers["x-api-token"];
+  const expectedToken = process.env.API_TOKEN;
+
+  if (!expectedToken) {
+    log.warn("API_TOKEN not configured - API endpoints are unprotected");
+    return next();
+  }
+
+  if (!token || token !== expectedToken) {
+    log.warn("Unauthorized API access attempt from %s", req.ip);
+    return res.status(401).json({ error: "Unauthorized" });
+  }
+
+  next();
+};
+
+// Routes
+app.use("/api", authenticateAPI as express.RequestHandler);
+app.use("/api", chaptersRouter);
+app.use("/polls", pollsRouter);
+
+// Health check endpoint
+app.get("/health", (req, res) => {
+  res.json({ 
+    status: "ok", 
+    timestamp: new Date().toISOString(),
+    version: "1.0.0"
+  });
+});
+
+// Root endpoint
+app.get("/", (req, res) => {
+  res.sendFile("index.html", { root: "public" });
+});
+
+// Error handling middleware
+app.use((err: Error, req: express.Request, res: express.Response, next: express.NextFunction) => {
+  log.error(err, "Unhandled error in request");
+  res.status(500).json({ error: "Internal server error" });
+});
+
+const supabase = createClient(
+  process.env.SUPABASE_URL!,
+  process.env.SUPABASE_ANON_KEY!
+);
+
+async function ensureFirstPoll() {
+  log.info("[INIT] Checking for open polls on startup...");
+  const { data: polls, error } = await supabase
+    .from("polls")
+    .select("*")
+    .gt("closes_at", new Date().toISOString())
+    .order("closes_at", { ascending: true })
+    .limit(1);
+
+  if (error) {
+    log.error("[INIT] Error checking for open polls: %s", error.message || error);
+    return;
+  }
+
+  if (!polls || polls.length === 0) {
+    log.info("[INIT] No open polls found. Creating the first poll...");
+    const pollDuration = 10 * 1000; // 10 seconds for testing
+    const { data, error: createError } = await supabase
+      .from("polls")
+      .insert({
+        question: "Should the Bald Brothers start a new adventure?",
+        options: ["yes", "no"],
+        closes_at: new Date(Date.now() + pollDuration)
+      })
+      .select()
+      .single();
+    if (createError) {
+      log.error("[INIT] Failed to create first poll: %s", createError.message || createError);
+    } else {
+      log.info("[INIT] First poll created with ID %s", data.id);
+    }
+  } else {
+    log.info("[INIT] Open poll already exists with ID %s", polls[0].id);
+  }
+}
+
+// Start server
+app.listen(PORT, async () => {
+  log.info("Bald Brothers Story Engine server started on port %d", PORT);
+  log.info("Environment: %s", process.env.NODE_ENV || "development");
+  
+  // Start the poll scheduler
+  startPollScheduler();
+  
+  // Ensure the first poll exists
+  await ensureFirstPoll();
+  
+  // Log configuration status
+  const requiredEnvVars = ["SUPABASE_URL", "SUPABASE_ANON_KEY", "OPENROUTER_API_KEY"];
+  const missingVars = requiredEnvVars.filter(varName => !process.env[varName]);
+  
+  if (missingVars.length > 0) {
+    log.warn("Missing required environment variables: %s", missingVars.join(", "));
+    log.info("Please check your .env file against .env.example");
+  } else {
+    log.info("All required environment variables are configured");
+  }
+});
+
+export default app;
 </file>
 
 <file path="DEVLOG.md">
@@ -2767,6 +2767,7 @@ const supabase = createClient(
 
 export const ChapterAgent = new FeatherAgent({
   model: "openai/gpt-4o-mini",
+  // max_tokens is not a valid property for FeatherAgent config; control token usage in prompt or agent config if supported
   systemPrompt: `You are the Bald Brothers Scribe, a master storyteller tasked with continuing the epic saga of the Bald Brothers. Your role is to generate compelling, engaging chapters that build upon the existing lore and narrative threads.
 
 Guidelines:
@@ -2844,38 +2845,30 @@ You have access to tools to retrieve recent story context and save new chapters.
         parameters: {
           type: "object",
           properties: {
-            title: {
-              type: "string",
-              description: "The chapter title"
-            },
             body: {
               type: "string",
               description: "The chapter content"
             }
           },
-          required: ["title", "body"]
+          required: ["body"]
         }
       },
       execute: async (args: Record<string, any>) => {
-        const { title, body } = args as { title: string; body: string };
-        log.info("Saving new chapter: %s", title);
-        
+        const { body } = args as { body: string };
+        log.info("Saving new chapter via agent tool");
         const { data, error } = await supabase
           .from("beats")
           .insert({
             arc_id: "1", // Main story arc
-            title,
             body,
             authored_at: new Date()
           })
           .select()
           .single();
-        
         if (error) {
           log.error((error as Error).message || String(error), "Failed to save chapter");
           throw error;
         }
-        
         return data;
       }
     }
@@ -3823,21 +3816,24 @@ async function generateStoryOptions(chapterContent: string) {
 }
 
 // Helper to save a chapter with validation and fallback
-async function saveChapterWithValidation(chapterData: { body?: string, title?: string }) {
+async function saveChapterWithValidation(chapterData: { body?: string }) {
   let body = chapterData?.body;
-  let title = chapterData?.title || 'Untitled Chapter';
   if (!body || typeof body !== 'string' || body.trim().length < 10) {
     // Fallback content
     body = 'The Bald Brothers continue their journey, but the details are lost to legend. The story will resume with the next decision.';
-    title = 'A Lost Chapter';
     log.warn('[Scheduler] Chapter generation failed, using fallback content.');
   }
-  const { error } = await supabase.from('beats').insert({ arc_id: '1', body, title, authored_at: new Date() });
+  const { error } = await supabase.from('beats').insert({
+    arc_id: '1',
+    body,
+    authored_at: new Date()
+  });
   if (error) {
     log.error((error as any)?.message || String(error), 'Failed to save chapter');
-  } else {
-    log.info(`[Scheduler] Chapter saved: ${title}`);
+    return false; // Indicate failure
   }
+  log.info(`[Scheduler] Chapter saved successfully.`);
+  return true; // Indicate success
 }
 
 /**
@@ -3999,12 +3995,12 @@ export async function closePollAndTally() {
         if (!chapterResponse.ok) {
           throw new Error(`Chapter generation failed: ${chapterResponse.statusText}`);
         }
-        const chapterData = await chapterResponse.json() as unknown as { body?: string, title?: string };
+        const chapterData = await chapterResponse.json() as unknown as { body?: string };
         await saveChapterWithValidation(chapterData);
       } catch (chapterError) {
         log.error((chapterError as any)?.message || String(chapterError), "Failed to generate first chapter after yes/no poll");
         // Fallback: save a default chapter
-        await saveChapterWithValidation({ body: '', title: '' });
+        await saveChapterWithValidation({ body: '' });
       }
       // Now create the first two-choice poll
       const { data: latestChapter, error: chapterError } = await supabase
@@ -4054,7 +4050,7 @@ export async function closePollAndTally() {
         if (!chapterResponse.ok) {
           throw new Error(`Chapter generation failed: ${chapterResponse.statusText}`);
         }
-        const chapterData = await chapterResponse.json() as unknown as { body?: string, title?: string };
+        const chapterData = await chapterResponse.json() as unknown as { body?: string };
         await saveChapterWithValidation(chapterData);
         // Confirm chapter is saved in DB
         const { data: latestChapter, error: chapterError } = await supabase
@@ -4071,7 +4067,7 @@ export async function closePollAndTally() {
       } catch (chapterError) {
         log.error((chapterError as any)?.message || String(chapterError), "Failed to generate or save chapter");
         // Fallback: save a default chapter
-        await saveChapterWithValidation({ body: '', title: '' });
+        await saveChapterWithValidation({ body: '' });
       }
       if (!chapterSaved) {
         log.error("[Scheduler] Aborting poll creation: chapter not confirmed saved.");
