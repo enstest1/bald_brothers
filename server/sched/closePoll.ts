@@ -27,6 +27,9 @@ const supabase = createClient(
   process.env.SUPABASE_ANON_KEY!
 );
 
+// Add a lock to prevent concurrent executions
+let isProcessingPollClosure = false;
+
 /**
  * Helper to generate story poll options based on the latest chapter content.
  * Falls back to a default question if generation fails or no chapter exists.
@@ -77,8 +80,13 @@ async function saveChapterWithValidation(chapterData: { body?: string, title?: s
  * All major steps are logged for robust observability.
  */
 export async function closePollAndTally() {
+  if (isProcessingPollClosure) {
+    log.info("[Scheduler] Poll closure processing is already in progress. Skipping this run.");
+    return;
+  }
+  isProcessingPollClosure = true;
   try {
-    log.info("[Scheduler] Triggered scheduled poll closure (every 10s)");
+    log.info("[Scheduler] Starting scheduled poll closure and tally process.");
 
     // Check if any chapters exist
     const { data: chapters, error: chaptersError } = await supabase
@@ -343,26 +351,32 @@ export async function closePollAndTally() {
       return;
     }
   } catch (error) {
-    log.error((error as any)?.message || String(error), "Error in scheduled poll closure");
+    log.error((error as any)?.message || String(error), "Error in scheduled poll closure routine");
+  } finally {
+    isProcessingPollClosure = false; // Release the lock
+    log.info("[Scheduler] Finished scheduled poll closure and tally process.");
   }
 }
 
 /**
- * Starts the poll scheduler to close polls and create new ones every 10 seconds (testing mode).
+ * Starts the poll scheduler to close polls and create new ones every 35 seconds (testing mode).
  * This ensures the poll-chapter loop is always running.
  */
 export function startPollScheduler() {
-  log.info("🤖🦾 [AI DEBUG] If you see this, the AI overlords have hijacked your poll scheduler! Polls will close every 10 seconds. Resistance is futile. [session:" + Date.now() + "]");
-  cron.schedule("*/10 * * * * *", async () => {
-    log.info("[Scheduler] Triggered scheduled poll closure (every 10s)");
+  // Set scheduler interval to 35 seconds for dev/test
+  const cronIntervalSeconds = 35;
+  log.info(`[Scheduler] Initializing. Will attempt to run poll closure tasks every ${cronIntervalSeconds} seconds.`);
+
+  // Run the scheduler every 35 seconds
+  cron.schedule(`*/${cronIntervalSeconds} * * * * *`, async () => {
+    log.info(`[Scheduler] Cron tick: Triggered poll closure task.`);
     const startTime = Date.now();
-    await closePollAndTally();
+    await closePollAndTally(); // This now has the lock mechanism
     const endTime = Date.now();
-    log.info(`[Scheduler] Poll closure and next poll creation completed in ${endTime - startTime}ms`);
-    // Add a small delay to avoid race conditions
-    await new Promise(resolve => setTimeout(resolve, 60000)); // 60 seconds delay
+    log.info(`[Scheduler] Cron task: closePollAndTally execution took ${endTime - startTime}ms`);
+    // REMOVED: await new Promise(resolve => setTimeout(resolve, 60000));
   });
-  log.info("[Scheduler] Poll scheduler started - will close polls every 10 seconds (testing mode)");
+  log.info(`[Scheduler] Poll scheduler started. Cron interval: every ${cronIntervalSeconds} seconds.`);
 }
 
 // Allow manual execution for testing
