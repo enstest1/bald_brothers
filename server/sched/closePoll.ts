@@ -56,6 +56,14 @@ async function generateAndSaveChapter(prompt: string): Promise<boolean> {
 
 async function createNextPoll(): Promise<void> {
     log.info("[Scheduler] Creating the next poll...");
+
+    // First, ensure a chapter exists. If not, create the genesis chapter.
+    const { count: chapterCount } = await supabase.from("beats").select('*', { count: 'exact', head: true });
+    if (chapterCount === 0) {
+        log.warn("[Scheduler] No chapters exist. Creating genesis chapter to start the story.");
+        const genesisBody = "In the age of myth, where legends were forged in the crucible of destiny, two brothers, known only by their gleaming crowns of flesh, stood at a crossroads. The world, vast and unknowing, awaited their first, fateful decision. This is the beginning of the Bald Brothers' saga.";
+        await supabase.from("beats").insert({ arc_id: "1", body: genesisBody });
+    }
     
     const { data: latestChapter, error: chapterError } = await supabase
         .from("beats")

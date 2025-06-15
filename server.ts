@@ -4,49 +4,10 @@ import "dotenv/config";
 import chaptersRouter from "./server/routes/chapters";
 import pollsRouter from "./server/routes/polls";
 import { startPollScheduler } from "./server/sched/closePoll";
-import { createClient } from "@supabase/supabase-js";
 const log = require("pino")();
 
 const app = express();
 const PORT = process.env.PORT || 3000;
-
-// NEW bootstrapStory function to fix the startup deadlock
-async function bootstrapStory() {
-  const supabase = createClient(
-    process.env.SUPABASE_URL!,
-    process.env.SUPABASE_ANON_KEY!
-  );
-
-  log.info("[INIT] Bootstrapping story engine...");
-
-  // 1. Check if any chapters (beats) exist.
-  const { count: chapterCount, error: countError } = await supabase
-    .from("beats")
-    .select('*', { count: 'exact', head: true });
-
-  if (countError) {
-    log.error(countError, "[INIT] Error checking for chapters.");
-    return;
-  }
-
-  // If no chapters exist, create the very first one.
-  if (chapterCount === 0) {
-    log.info("[INIT] No chapters found. Creating genesis chapter...");
-    const genesisBody = "In the age of myth, where legends were forged in the crucible of destiny, two brothers, known only by their gleaming crowns of flesh, stood at a crossroads. The world, vast and unknowing, awaited their first, fateful decision. This is the beginning of the Bald Brothers' saga.";
-    const { error: insertError } = await supabase.from("beats").insert({
-      arc_id: "1",
-      body: genesisBody,
-      authored_at: new Date()
-    });
-    if (insertError) {
-      log.error(insertError, "[INIT] Failed to create genesis chapter.");
-      return;
-    }
-    log.info("[INIT] Genesis chapter created.");
-  } else {
-    log.info(`[INIT] Found ${chapterCount} existing chapters. Bootstrap not needed.`);
-  }
-}
 
 // Middleware
 app.use(express.json());
@@ -87,9 +48,6 @@ app.use((err: Error, req: express.Request, res: express.Response, next: express.
 app.listen(PORT, async () => {
   log.info("Bald Brothers Story Engine server started on port %d", PORT);
   log.info("Environment: %s", process.env.NODE_ENV || "development");
-  
-  // This is the only startup function we need.
-  await bootstrapStory();
   
   startPollScheduler();
   
