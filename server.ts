@@ -4,6 +4,7 @@ import "dotenv/config";
 import chaptersRouter from "./server/routes/chapters";
 import pollsRouter from "./server/routes/polls";
 import { startPollScheduler } from "./server/sched/closePoll";
+import { createClient } from "@supabase/supabase-js";
 const log = require("pino")();
 
 const app = express();
@@ -60,5 +61,38 @@ app.listen(PORT, async () => {
     log.info("All required environment variables are configured");
   }
 });
+
+async function bootstrapStory() {
+  const supabase = createClient(
+    process.env.SUPABASE_URL!,
+    process.env.SUPABASE_ANON_KEY!
+  );
+
+  log.info("[INIT] Bootstrapping story engine...");
+
+  const { count: chapterCount } = await supabase.from("beats").select('*', { count: 'exact', head: true });
+
+  if (chapterCount === 0) {
+    log.info("[INIT] No chapters found. Creating genesis chapter...");
+    const genesisBody = "In the age of myth, where legends were forged in the crucible of destiny, two brothers, known only by their gleaming crowns of flesh, stood at a crossroads. The world, vast and unknowing, awaited their first, fateful decision. This is the beginning of the Bald Brothers' saga.";
+    await supabase.from("beats").insert({ arc_id: "1", body: genesisBody });
+    log.info("[INIT] Genesis chapter created.");
+  }
+
+  const { count: openPollCount } = await supabase.from("polls").select('*', { count: 'exact', head: true }).gt('closes_at', new Date().toISOString());
+
+  // Only create the initial "Yes/No" poll if NO open polls exist
+  if (openPollCount === 0) {
+    log.info("[INIT] No open polls found. Creating an initial Yes/No kickoff poll...");
+    await supabase
+      .from("polls")
+      .insert({
+        question: "Should the Bald Brothers truly begin their epic saga?",
+        options: ["Yes, let the adventure start!", "No, they need more preparation."],
+        closes_at: new Date(Date.now() + 2 * 60 * 1000) // 2 minutes for testing
+      });
+    log.info("[INIT] Initial kickoff poll created successfully.");
+  }
+}
 
 export default app;
