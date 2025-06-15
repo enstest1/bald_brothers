@@ -173,7 +173,7 @@
             <p>A new chapter is being written. Please wait...</p>
         `;
     }
-    
+
     // --- Core Logic ---
     async function fetchLatestChapter() {
         try {
@@ -214,7 +214,6 @@
 
     async function vote(choiceIndex, pollId) {
         if (isWaitingForNextState) return;
-        pollIdToVoteOn = pollId; // Store the ID of the poll we just voted on
         renderVotedState();
 
         try {
@@ -223,7 +222,8 @@
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ choice: choiceIndex })
             });
-            setTimeout(lookForNewState, 10000); // Start checking for the next state after 10 seconds
+            // After voting, start checking for the next state.
+            setTimeout(() => lookForNewState(pollId), 5000); // Start checking after 5 seconds
         } catch (error) {
             console.error('Error submitting vote:', error);
             alert('Failed to submit vote. Please try again.');
@@ -232,39 +232,45 @@
         }
     }
     
-    function lookForNewState() {
-        console.log("Looking for new application state...");
+    // This function will run until a new poll appears.
+    function lookForNewState(votedPollId) {
+        console.log(`Looking for a new poll that is NOT ${votedPollId}`);
+        let attempts = 0;
+        const maxAttempts = 10; // Try for 50 seconds max
+
         const interval = setInterval(async () => {
+            attempts++;
+            if (attempts > maxAttempts) {
+                console.error("Timeout: New state not found. Reloading page as a fallback.");
+                clearInterval(interval);
+                location.reload();
+                return;
+            }
+
             const response = await fetch('/polls/open');
             const data = await response.json();
-            if (data.poll && data.poll.id !== pollIdToVoteOn) {
+
+            if (data.poll && data.poll.id !== votedPollId) {
+                // A new poll is ready! Stop checking and re-initialize the page.
+                console.log(`New state found! Poll ID: ${data.poll.id}`);
                 clearInterval(interval);
                 isWaitingForNextState = false;
                 initialize();
+            } else {
+                console.log("Still waiting for new poll...");
             }
-        }, 7000); // Check every 7 seconds
-        
-        // Safety timeout: If nothing happens after 40 seconds (longer than the backend cycle), re-initialize.
-        setTimeout(() => {
-            if (isWaitingForNextState) {
-                clearInterval(interval);
-                isWaitingForNextState = false;
-                initialize();
-            }
-        }, 40000);
+        }, 5000); // Check every 5 seconds
     }
 
     // --- Initial Load ---
     function initialize() {
+        console.log("Initializing UI state...");
         renderLoadingState('story');
         renderLoadingState('poll');
         
         fetchLatestChapter();
         fetchOpenPoll();
     }
-
-    // This needs to be defined for lookForNewState to use it
-    let pollIdToVoteOn; 
 
     initialize();
   </script>

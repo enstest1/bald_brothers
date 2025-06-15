@@ -63,7 +63,7 @@ async function bootstrapStory() {
       .insert({
         question: "What path shall the brothers take first?",
         options: ["Venture into the Whispering Woods", "Climb the Sun-Scorched Peaks"],
-        closes_at: new Date(Date.now() + 24 * 60 * 60 * 1000) // 24 hours
+        closes_at: new Date(Date.now() + 30000) // 30 seconds for testing
       });
     if (createPollError) {
         log.error(createPollError, "[INIT] Failed to create initial poll.");
