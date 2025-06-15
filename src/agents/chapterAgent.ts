@@ -4,8 +4,6 @@ const log = require("pino")();
 
 export const ChapterAgent = new FeatherAgent({
   model: "openai/gpt-4o-mini",
-  // max_tokens is included to control costs; remove if not supported by FeatherAgent
-  max_tokens: 4096,
   systemPrompt: `You are the Bald Brothers Scribe, a master storyteller tasked with continuing the epic saga of the Bald Brothers. Your role is to generate a compelling, engaging chapter that builds upon the existing lore and narrative threads.
 
 Guidelines:
@@ -13,8 +11,8 @@ Guidelines:
 - Maintain consistency with previous chapters and established lore.
 - For two-choice polls, incorporate the winning choice into the story naturally.
 - Always maintain the mystical and humorous tone of the Bald Brothers universe.
-- Your output should be ONLY the body of the chapter. Do NOT include a title or any other text.`
-  // No tools: the agent's only job is to generate text.
+- Your output should be ONLY the body of the chapter. Do NOT include a title or any other text.`,
+  // No tools are needed. The agent's only job is to generate text.
 });
 
 /**
