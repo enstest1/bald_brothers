@@ -39,12 +39,13 @@
     .banner video { width: 100%; display: block; }
     /* Commandment section */
     .commandment {
-      background: #131313cc;
+      background: rgba(19, 19, 19, 0.8);
       border: 2px solid #ffe600;
       border-radius: 8px;
       margin: 2rem 0;
       padding: 2rem;
       text-align: center;
+      box-shadow: 0 2px 12px rgba(0, 0, 0, 0.3);
     }
     .commandment h2 {
       font-family: 'UnifrakturMaguntia', cursive;
@@ -55,12 +56,13 @@
     .commandment p { max-width: 36ch; margin: auto; }
     /* Poll section */
     .poll {
-      background: #181818cc;
-      border-radius: 10px;
-      padding: 2rem;
+      background: rgba(19, 19, 19, 0.8);
+      border: 2px solid #ffe600;
+      border-radius: 8px;
       margin: 2rem 0;
-      box-shadow: 0 2px 12px #0005;
+      padding: 2rem;
       text-align: center;
+      box-shadow: 0 2px 12px rgba(0, 0, 0, 0.3);
     }
     .poll video { width: 180px; border-radius: 8px; margin-bottom: 1rem; }
     .poll button {
@@ -71,64 +73,25 @@
       padding: 0.7em 2em;
       border: none;
       border-radius: 6px;
-      margin: 0 1em;
+      margin: 0.5em;
       cursor: pointer;
-      box-shadow: 0 2px 8px #0003;
-      transition: background 0.2s;
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+      transition: background 0.2s, transform 0.1s;
     }
-    .poll button:hover { background: #fff200; }
-    /* Poll Results Styling */
-    .poll-results {
-      margin: 1rem 0;
-      padding: 1rem;
-      background: #222c;
-      border-radius: 8px;
-    }
-    
-    .result-bar {
-      display: flex;
-      height: 30px;
-      margin: 1rem 0;
-      border-radius: 4px;
-      overflow: hidden;
-    }
-    
-    .yes-bar, .no-bar {
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      color: #000;
-      font-weight: bold;
-      transition: width 0.3s ease;
-      min-width: 60px;
-    }
-    
-    .yes-bar {
-      background: #4CAF50;
-    }
-    
-    .no-bar {
-      background: #f44336;
-    }
-    
-    .total-votes {
-      text-align: center;
-      margin-top: 0.5rem;
-      font-size: 0.9rem;
-      color: #888;
-    }
+    .poll button:hover { background: #fff200; transform: translateY(-2px); }
+    .poll button:disabled { background: #555; color: #888; cursor: not-allowed; }
     /* Story area */
     .story {
-      background: #222c;
-      border-radius: 12px;
+      background: rgba(19, 19, 19, 0.8);
       border: 2px solid #ffe600;
+      border-radius: 8px;
       margin: 2rem 0;
       padding: 2rem;
-      min-height: 120px;
       text-align: center;
+      box-shadow: 0 2px 12px rgba(0, 0, 0, 0.3);
       font-size: 1.2rem;
-      position: relative;
     }
+    .story p { line-height: 1.6; }
     /* Footer */
     footer { text-align:center; font-size:.875rem; margin:3rem 0 1rem; color:#888; }
     a { color:#ffe600; }
@@ -153,14 +116,15 @@
     <section class="poll" id="poll-section">
       <video src="./images/yesno.mp4" autoplay loop muted playsinline></video>
       <div id="current-poll">
-        <h2>Loading current poll...</h2>
+        <h2>Loading...</h2>
       </div>
     </section>
     <!-- Story area -->
     <section class="story" id="story-section">
-      <h2 id="story-heading">The story begins soon...</h2>
-      <div id="countdown" style="font-size:1.5rem;margin:1rem 0;"></div>
-      <div id="chapter-content" style="display:none;"></div>
+      <h2 id="story-heading">Loading The Saga...</h2>
+      <div id="chapter-content">
+        <p>The chronicles of the Bald Brotherhood are being transcribed...</p>
+      </div>
     </section>
     <!-- Footer -->
     <footer>
@@ -169,67 +133,20 @@
     </footer>
   </div>
   <script>
-    const pollSection = document.getElementById('poll-section');
-    const storySection = document.getElementById('story-section');
     const storyHeading = document.getElementById('story-heading');
     const chapterContent = document.getElementById('chapter-content');
     const currentPollDiv = document.getElementById('current-poll');
 
     let currentPoll = null;
-    let pollInterval;
+    let pollCheckInterval = null;
 
-    // --- Core Functions ---
+    // --- State Rendering Functions ---
 
-    async function fetchLatestChapter() {
-        try {
-            const response = await fetch('/api/beats/latest');
-            const data = await response.json();
-            if (!response.ok) {
-                if(response.status === 404) {
-                    storyHeading.textContent = 'The Story Begins...';
-                    chapterContent.innerHTML = `<p>${data.body}</p>`;
-                } else {
-                   throw new Error(data.error || 'Failed to load chapter');
-                }
-            } else {
-                storyHeading.textContent = data.title;
-                chapterContent.innerHTML = `<p>${data.body.replace(/\n/g, '<br>')}</p>`;
-                // Add a note if the fallback chapter is shown
-                if (data.body && data.body.includes('The Bald Brothers continue their journey, but the details are lost to legend.')) {
-                    chapterContent.innerHTML += '<p style="color:orange;"><em>(AI is recharging. This is a fallback chapter.)</em></p>';
-                }
-            }
-            storySection.style.display = 'block';
-        } catch (error) {
-            console.error('Error fetching chapter:', error);
-            storyHeading.textContent = 'Error Loading Story';
-            chapterContent.innerHTML = '<p>Could not load the latest chapter. Please refresh the page.</p>';
-        }
+    function renderLoadingPoll() {
+        currentPollDiv.innerHTML = '<h2>Searching for the next path...</h2><p><small>The fates are aligning.</small></p>';
     }
 
-    async function fetchOpenPoll() {
-        try {
-            const response = await fetch('/polls/open');
-            const data = await response.json();
-            
-            if (data.poll) {
-                if (pollInterval) clearInterval(pollInterval); // Stop polling once we find a poll
-                currentPoll = data.poll;
-                displayPoll(currentPoll);
-            } else {
-                // If no poll is active, keep trying every 5 seconds
-                currentPollDiv.innerHTML = '<h2>Searching for the next path...</h2>';
-                if (!pollInterval) {
-                   pollInterval = setInterval(fetchOpenPoll, 5000);
-                }
-            }
-        } catch (error) {
-            console.error('Error loading poll:', error);
-            currentPollDiv.innerHTML = '<h2>Error loading poll. Retrying...</h2>';
-        }
-    }
-
-    function displayPoll(poll) {
+    function renderPoll(poll) {
         currentPollDiv.innerHTML = `
             <h2>Current Poll</h2>
             <p><strong>${poll.question}</strong></p>
@@ -242,15 +159,73 @@
         `;
     }
 
-    async function vote(choiceIndex) {
-        if (!currentPoll) return;
-
+    function renderVotedState() {
+        let countdown = 15;
         currentPollDiv.innerHTML = `
             <h2>Thank you for voting!</h2>
             <p>The Bald Brothers' destiny is being forged...</p>
             <p>Generating next chapter...</p>
-            <div id="next-chapter-countdown">Next chapter in 10 seconds...</div>
+            <div id="next-chapter-countdown">Next chapter in ${countdown} seconds...</div>
         `;
+        const countdownElement = document.getElementById('next-chapter-countdown');
+        const voteInterval = setInterval(() => {
+            countdown--;
+            if (countdownElement) {
+                countdownElement.textContent = `Next chapter in ${countdown} seconds...`;
+            }
+            if (countdown <= 0) {
+                clearInterval(voteInterval);
+                initialize(); // Re-initialize the app to fetch new state
+            }
+        }, 1000);
+    }
+    
+    // --- Core Logic ---
+
+    async function fetchLatestChapter() {
+        try {
+            const response = await fetch('/api/beats/latest');
+            const data = await response.json();
+            if (!response.ok) {
+                storyHeading.textContent = 'The Story Begins...';
+                chapterContent.innerHTML = `<p>${data.body || "The chronicles are about to be written..."}</p>`;
+            } else {
+                storyHeading.textContent = data.title;
+                chapterContent.innerHTML = `<p>${data.body.replace(/\n/g, '<br>')}</p>`;
+            }
+        } catch (error) {
+            console.error('Error fetching chapter:', error);
+            storyHeading.textContent = 'Error Loading Story';
+            chapterContent.innerHTML = '<p>Could not load the latest chapter. Please refresh the page.</p>';
+        }
+    }
+
+    async function fetchOpenPoll() {
+        try {
+            const response = await fetch('/polls/open');
+            const data = await response.json();
+            
+            if (data.poll && data.poll.id !== currentPoll?.id) {
+                if (pollCheckInterval) clearInterval(pollCheckInterval);
+                pollCheckInterval = null;
+                currentPoll = data.poll;
+                renderPoll(currentPoll);
+            } else if (!data.poll && !pollCheckInterval) {
+                renderLoadingPoll();
+                pollCheckInterval = setInterval(fetchOpenPoll, 5000);
+            }
+        } catch (error) {
+            console.error('Error loading poll:', error);
+            currentPollDiv.innerHTML = '<h2>Error loading poll. Retrying...</h2>';
+        }
+    }
+
+    async function vote(choiceIndex) {
+        if (!currentPoll) return;
+        
+        // Disable buttons after voting
+        const buttons = currentPollDiv.querySelectorAll('button');
+        buttons.forEach(button => button.disabled = true);
 
         try {
             await fetch(`/polls/${currentPoll.id}/vote`, {
@@ -258,32 +233,20 @@
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ choice: choiceIndex })
             });
-
-            // Wait for backend to process and start a new cycle
-            setTimeout(() => {
-                location.reload(); // Simple solution: reload the page to get the new state
-            }, 10000); // 10 seconds
-
+            renderVotedState();
         } catch (error) {
             console.error('Error submitting vote:', error);
             alert('Failed to submit vote. Please try again.');
-            fetchOpenPoll(); // Re-load the poll on failure
+            buttons.forEach(button => button.disabled = false); // Re-enable buttons on failure
         }
     }
 
     // --- Initial Load ---
 
     function initialize() {
-        storyHeading.textContent = 'Loading The Saga...';
-        currentPollDiv.innerHTML = '<h2>Loading...</h2>';
-        
         fetchLatestChapter();
         fetchOpenPoll();
     }
-    
-    // Remove the old countdown logic from the body
-    const initialCountdownDiv = document.getElementById('countdown');
-    if(initialCountdownDiv) initialCountdownDiv.style.display = 'none';
 
     initialize();
   </script>
