@@ -188,8 +188,10 @@
     
     // --- Core Logic ---
     async function fetchLatestChapter() {
+        console.log("Fetching latest chapter with cache-buster...");
         try {
-            const response = await fetch('/api/beats/latest');
+            // Add a cache-busting query parameter
+            const response = await fetch(`/api/beats/latest?t=${new Date().getTime()}`);
             const data = await response.json();
             if (!response.ok) {
                 storyHeading.textContent = 'The Story Begins...';

@@ -80,15 +80,19 @@ export async function closePollAndTally() {
   log.info("[Scheduler] Starting poll closure cycle...");
 
   try {
-    const { data: pollToProcess, error: pollError } = await supabase
-        .from('polls').select('*').lt('closes_at', new Date().toISOString()).is('processed_at', null).order('closes_at', { ascending: false }).limit(1).single();
+    const { data: pollToProcess, error } = await supabase
+        .from('polls')
+        .select('*')
+        .lt('closes_at', new Date().toISOString())
+        .is('processed_at', null)
+        .order('closes_at', { ascending: false })
+        .limit(1)
+        .single();
 
-    if (pollError || !pollToProcess) {
-        const { count: openPollCount } = await supabase.from('polls').select('*', { count: 'exact', head: true }).gt('closes_at', new Date().toISOString());
-        if (openPollCount === 0) {
-            log.warn("[Scheduler] No open polls found. Creating a new one to unstick the system.");
-            await createNextPoll();
-        }
+    if (error || !pollToProcess) {
+        log.info("[Scheduler] No unprocessed closed polls found. Cycle finished.");
+        // If no poll is found to process, we simply end the cycle.
+        // The createNextPoll() function is ONLY called after a chapter is successfully generated.
     } else {
         log.info(`[Scheduler] Found unprocessed poll to process: ID ${pollToProcess.id}`);
         await supabase.from('polls').update({ processed_at: new Date().toISOString() }).eq('id', pollToProcess.id);
