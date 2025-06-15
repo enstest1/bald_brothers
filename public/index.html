@@ -138,7 +138,7 @@
     const currentPollDiv = document.getElementById('current-poll');
 
     let currentPollId = null;
-    let pollCheckInterval = null;
+    let isWaitingForNextState = false;
 
     // --- State Rendering Functions ---
 
@@ -152,23 +152,28 @@
     }
 
     function renderPoll(poll) {
-        currentPollDiv.innerHTML = `
-            <h2>Current Poll</h2>
-            <p><strong>${poll.question}</strong></p>
-            <div class="poll-options">
-              ${poll.options.map((option, index) => `
-                <button onclick="vote(${index})">${option}</button>
-              `).join('')}
-            </div>
-            <p><small>A new path will be chosen soon...</small></p>
-        `;
+        // Only render the poll if we are not waiting for a new chapter.
+        if (!isWaitingForNextState) {
+            currentPollId = poll.id;
+            currentPollDiv.innerHTML = `
+                <h2>Current Poll</h2>
+                <p><strong>${poll.question}</strong></p>
+                <div class="poll-options">
+                  ${poll.options.map((option, index) => `
+                    <button onclick="vote(${index}, '${poll.id}')">${option}</button>
+                  `).join('')}
+                </div>
+                <p><small>A new path will be chosen soon...</small></p>
+            `;
+        }
     }
 
     function renderVotedState() {
+        isWaitingForNextState = true;
         currentPollDiv.innerHTML = `
             <h2>Thank you for voting!</h2>
             <p>The Bald Brothers' destiny is being forged...</p>
-            <p>A new chapter is being written.</p>
+            <p>A new chapter is being written. Please wait...</p>
         `;
     }
     
@@ -193,22 +198,16 @@
     }
 
     async function fetchOpenPoll() {
+        if (isWaitingForNextState) return; // Don't check for new polls while waiting for a chapter
+
         try {
             const response = await fetch('/polls/open');
             const data = await response.json();
             
-            // If a new, different poll is available, display it.
-            if (data.poll && data.poll.id !== currentPollId) {
-                console.log(`New poll found: ${data.poll.id}`);
-                if (pollCheckInterval) clearInterval(pollCheckInterval);
-                pollCheckInterval = null;
-                currentPollId = data.poll.id;
+            if (data.poll) {
                 renderPoll(data.poll);
-            } else if (!data.poll && !pollCheckInterval) {
-                // If no poll is active, start checking every 5 seconds.
-                console.log('No active poll. Starting polling interval.');
+            } else {
                 renderLoadingState('poll');
-                pollCheckInterval = setInterval(fetchOpenPoll, 5000);
             }
         } catch (error) {
             console.error('Error loading poll:', error);
@@ -216,31 +215,42 @@
         }
     }
 
-    async function vote(choiceIndex) {
-        if (!currentPollId) return;
-        
-        const pollIdToVoteOn = currentPollId;
-        currentPollId = null; // Prevent re-voting on the same poll
+    async function vote(choiceIndex, pollId) {
+        // Prevent voting if we're already processing a vote
+        if (isWaitingForNextState) return;
+
         renderVotedState();
 
         try {
-            await fetch(`/polls/${pollIdToVoteOn}/vote`, {
+            await fetch(`/polls/${pollId}/vote`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ choice: choiceIndex })
             });
-
-            // After voting, wait a moment then start looking for the next chapter and poll.
-            setTimeout(() => {
-                initialize();
-            }, 5000); // Start checking for new state after 5 seconds
-
+            // After voting, start checking for the new state.
+            // The backend takes ~35 seconds for its cycle. We'll check sooner.
+            setTimeout(lookForNewState, 5000);
         } catch (error) {
             console.error('Error submitting vote:', error);
             alert('Failed to submit vote. Please try again.');
-            // Re-initialize to try again
-            initialize();
+            isWaitingForNextState = false; // Reset state on failure
+            fetchOpenPoll();
         }
+    }
+    
+    // This function will run until a new poll appears.
+    function lookForNewState() {
+        console.log("Looking for new state...");
+        const interval = setInterval(async () => {
+            const response = await fetch('/polls/open');
+            const data = await response.json();
+            if (data.poll && data.poll.id !== currentPollId) {
+                // A new poll is ready! Stop checking and re-initialize the page.
+                clearInterval(interval);
+                isWaitingForNextState = false;
+                initialize();
+            }
+        }, 5000); // Check every 5 seconds
     }
 
     // --- Initial Load ---
@@ -250,10 +260,6 @@
         fetchLatestChapter();
         fetchOpenPoll();
     }
-
-    // Remove the initial static countdown div if it exists
-    const initialCountdownDiv = document.getElementById('countdown');
-    if(initialCountdownDiv) initialCountdownDiv.style.display = 'none';
 
     initialize();
   </script>
