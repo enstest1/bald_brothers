@@ -137,17 +137,23 @@
     const chapterContent = document.getElementById('chapter-content');
     const currentPollDiv = document.getElementById('current-poll');
 
+    let currentPollId = null; // Track the ID of the poll currently displayed
+    let isWaitingForUpdate = false; // A flag to prevent multiple overlapping actions
+
     // --- State Rendering Functions ---
-    function renderLoadingState(section) {
+
+    function renderLoading(section) {
         if (section === 'story') {
             storyHeading.textContent = 'Loading The Saga...';
             chapterContent.innerHTML = '<p>The chronicles of the Bald Brotherhood are being transcribed...</p>';
-        } else if (section === 'poll') {
+        } else {
             currentPollDiv.innerHTML = '<h2>Searching for the next path...</h2><p><small>The fates are aligning.</small></p>';
         }
     }
 
     function renderPoll(poll) {
+        if (isWaitingForUpdate) return;
+        currentPollId = poll.id;
         let timeLeft = Math.round((new Date(poll.closes_at) - new Date()) / 1000);
         
         currentPollDiv.innerHTML = `
@@ -164,20 +170,29 @@
         const countdownSpan = document.getElementById('poll-countdown');
         if (!countdownSpan) return;
         const pollTimer = setInterval(() => {
-            if (document.body.contains(countdownSpan)) {
-                timeLeft--;
-                countdownSpan.textContent = timeLeft > 0 ? timeLeft : 0;
-                if (timeLeft <= 0) clearInterval(pollTimer);
-            } else {
+            if (!document.body.contains(countdownSpan)) {
                 clearInterval(pollTimer);
+                return;
             }
+            timeLeft--;
+            countdownSpan.textContent = timeLeft > 0 ? timeLeft : 0;
+            if (timeLeft <= 0) clearInterval(pollTimer);
         }, 1000);
     }
 
+    function renderVotedState() {
+        isWaitingForUpdate = true;
+        currentPollDiv.innerHTML = `
+            <h2>Thank you for voting!</h2>
+            <p>The Bald Brothers' destiny is being forged...</p>
+            <p>A new chapter is being written. Please wait...</p>
+        `;
+    }
+    
     // --- Core Logic ---
+
     async function fetchLatestChapter() {
         try {
-            // Add a cache-busting query parameter to the URL
             const response = await fetch(`/api/beats/latest?t=${new Date().getTime()}`);
             const data = await response.json();
             if (response.ok) {
@@ -188,57 +203,69 @@
                 chapterContent.innerHTML = `<p>${data.body || "The chronicles are about to be written..."}</p>`;
             }
         } catch (error) {
-            storyHeading.textContent = 'Error Loading Story';
-            chapterContent.innerHTML = '<p>Could not load the latest chapter. Please refresh the page.</p>';
+            console.error('Error fetching chapter:', error);
         }
     }
 
     async function fetchOpenPoll() {
+        if (isWaitingForUpdate) return;
         try {
-            // Add a cache-busting query parameter to the URL
             const response = await fetch(`/polls/open?t=${new Date().getTime()}`);
             const data = await response.json();
             if (data.poll) {
                 renderPoll(data.poll);
             } else {
-                renderLoadingState('poll');
-                setTimeout(fetchOpenPoll, 7000); // If no poll, check again in 7s
+                renderLoading('poll');
+                setTimeout(fetchOpenPoll, 5000); 
             }
         } catch (error) {
-            currentPollDiv.innerHTML = '<h2>Error loading poll.</h2>';
+            console.error('Error loading poll:', error);
         }
     }
 
     async function vote(choiceIndex, pollId) {
-        // Show "Thank you" message
-        currentPollDiv.innerHTML = `
-            <h2>Thank you for voting!</h2>
-            <p>The Bald Brothers' destiny is being forged...</p>
-            <p>The page will update with the new chapter shortly.</p>
-        `;
+        if (isWaitingForUpdate) return;
+        renderVotedState();
 
-        // Send the vote
         try {
             await fetch(`/polls/${pollId}/vote`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ choice: choiceIndex })
             });
-        } catch(e) {
-            alert("Your vote could not be cast. Please try again.");
+            // After voting, start polling for the new state.
+            setTimeout(() => lookForNewState(pollId), 7000); // Start checking after 7 seconds
+        } catch (error) {
+            console.error('Error submitting vote:', error);
+            alert('Failed to submit vote. Please try again.');
             initialize();
-            return;
         }
+    }
+    
+    // This function will poll the server until it finds a new poll ID.
+    function lookForNewState(votedPollId) {
+        console.log(`Waiting for a new poll that is NOT ${votedPollId}`);
+        const interval = setInterval(async () => {
+            try {
+                const response = await fetch(`/polls/open?t=${new Date().getTime()}`);
+                const data = await response.json();
 
-        // Wait for the backend to complete its cycle, then force a reload.
-        setTimeout(() => {
-            location.reload(true); // 'true' forces a reload from the server, ignoring cache
-        }, 40000); 
+                // If a new poll exists and its ID is different, we have the new state.
+                if (data.poll && data.poll.id !== votedPollId) {
+                    console.log(`New state found! New Poll ID: ${data.poll.id}`);
+                    clearInterval(interval);
+                    initialize(); // Re-fetch everything
+                }
+            } catch (e) {
+                console.error("Error while looking for new state:", e);
+            }
+        }, 5000); // Check every 5 seconds
     }
 
     // --- Initial Load ---
     function initialize() {
         console.log("Initializing UI state...");
+        isWaitingForUpdate = false;
         fetchLatestChapter();
         fetchOpenPoll();
     }
