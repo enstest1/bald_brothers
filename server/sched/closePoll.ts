@@ -73,8 +73,8 @@ async function createNextPoll(): Promise<void> {
     let choices = ["Seek the ancient bald scrolls in the dark temple", "Train with the wise bald masters in the mountains"];
     
     try {
-        const prompt = `Based on this chapter:\n"${latestChapter.body}"\n\nGenerate a poll with two different story options for the next chapter. Each option should be a single sentence. Format the response as a JSON object with keys "question" and "choices" (an array of two strings). Example: {"question": "What happens next?", "choices": ["They enter the cave.", "They run away."]}`;
-        const result = await ChapterAgent.run(prompt);
+        const pollPrompt = `Based on this chapter:\n"${latestChapter.body}"\n\nGenerate a poll with two different story options for the next chapter. Each option should be a single sentence. Format the response as a JSON object with keys "question" and "choices" (an array of two strings). Example: {"question": "What happens next?", "choices": ["They enter the cave.", "They run away."]}`;
+        const result = await ChapterAgent.run(pollPrompt);
         if(result.success && result.output) {
             const parsed = JSON.parse(result.output as string);
             question = parsed.question;
@@ -117,12 +117,11 @@ export async function closePollAndTally() {
   log.info("[Scheduler] Starting poll closure cycle...");
 
   try {
-    // Find a poll that has closed AND has not been processed yet.
     const { data: pollToProcess, error: pollError } = await supabase
         .from('polls')
         .select('*')
         .lt('closes_at', new Date().toISOString())
-        .is('processed_at', null) // <-- THE CRITICAL CHANGE
+        .is('processed_at', null)
         .order('closes_at', { ascending: false })
         .limit(1)
         .single();
@@ -139,7 +138,6 @@ export async function closePollAndTally() {
     
     log.info(`[Scheduler] Found unprocessed poll to process: ID ${pollToProcess.id}`);
     
-    // Mark the poll as processed NOW to prevent race conditions.
     const { error: updateError } = await supabase
       .from('polls')
       .update({ processed_at: new Date().toISOString() })
@@ -151,7 +149,6 @@ export async function closePollAndTally() {
     }
     log.info(`[Scheduler] Poll ${pollToProcess.id} has been marked as processed.`);
 
-    // Tally votes
     const { data: votes } = await supabase.from("votes").select("choice").eq("poll_id", pollToProcess.id);
     const voteCounts = (pollToProcess.options as string[]).map((option, index) => ({
       option,
@@ -160,8 +157,8 @@ export async function closePollAndTally() {
     const winner = voteCounts.reduce((a, b) => (b.count >= a.count ? b : a), { count: -1, option: voteCounts[0]?.option });
     log.info(`[Scheduler] Poll winner is "${winner.option}" with ${winner.count} votes.`);
 
-    // Generate chapter
     const { data: latestChapter } = await supabase.from("beats").select("body").order("authored_at", { ascending: false }).limit(1).single();
+    
     const prompt = `The last chapter was:\n"${latestChapter?.body}"\n\nThe community voted for the story to continue with the following direction: "${winner.option}".\n\nWrite the next chapter of the Bald Brothers saga incorporating this choice.`;
     
     const chapterSaved = await generateAndSaveChapter(prompt);
