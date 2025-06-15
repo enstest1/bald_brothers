@@ -61,9 +61,9 @@ async function bootstrapStory() {
     const { error: createPollError } = await supabase
       .from("polls")
       .insert({
-        question: "What path shall the brothers take first?",
-        options: ["Venture into the Whispering Woods", "Climb the Sun-Scorched Peaks"],
-        closes_at: new Date(Date.now() + 30000) // 30 seconds for testing
+        question: "Should the Bald Brothers begin their epic quest?",
+        options: ["Yes, the saga must begin!", "No, let them rest."],
+        closes_at: new Date(Date.now() + 40000)
       });
     if (createPollError) {
         log.error(createPollError, "[INIT] Failed to create initial poll.");

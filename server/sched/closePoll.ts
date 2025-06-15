@@ -96,7 +96,7 @@ async function createNextPoll(): Promise<void> {
         .insert({
             question,
             options: choices,
-            closes_at: new Date(Date.now() + 30000)
+            closes_at: new Date(Date.now() + 40000)
         })
         .select("id, question")
         .single();
