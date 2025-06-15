@@ -10,31 +10,88 @@ const log = require("pino")();
 const app = express();
 const PORT = process.env.PORT || 3000;
 
+// NEW bootstrapStory function to fix the startup deadlock
+async function bootstrapStory() {
+  const supabase = createClient(
+    process.env.SUPABASE_URL!,
+    process.env.SUPABASE_ANON_KEY!
+  );
+
+  log.info("[INIT] Bootstrapping story engine...");
+
+  // 1. Check if any chapters (beats) exist.
+  const { count: chapterCount, error: countError } = await supabase
+    .from("beats")
+    .select('*', { count: 'exact', head: true });
+
+  if (countError) {
+    log.error(countError, "[INIT] Error checking for chapters.");
+    return;
+  }
+
+  // If no chapters exist, create the very first one.
+  if (chapterCount === 0) {
+    log.info("[INIT] No chapters found. Creating genesis chapter...");
+    const genesisBody = "In the age of myth, where legends were forged in the crucible of destiny, two brothers, known only by their gleaming crowns of flesh, stood at a crossroads. The world, vast and unknowing, awaited their first, fateful decision. This is the beginning of the Bald Brothers' saga.";
+    const { error: insertError } = await supabase.from("beats").insert({
+      arc_id: "1",
+      body: genesisBody,
+      authored_at: new Date()
+    });
+    if (insertError) {
+      log.error(insertError, "[INIT] Failed to create genesis chapter.");
+      return;
+    }
+    log.info("[INIT] Genesis chapter created.");
+  } else {
+    log.info(`[INIT] Found ${chapterCount} existing chapters. Bootstrap not needed.`);
+  }
+
+  // 2. Check if an open poll exists.
+  const { data: openPoll } = await supabase
+    .from("polls")
+    .select("id")
+    .gt("closes_at", new Date().toISOString())
+    .limit(1)
+    .single();
+
+  // If no open poll exists, create the first two-choice poll.
+  if (!openPoll) {
+    log.info("[INIT] No open polls found. Creating an initial poll...");
+    const { error: createPollError } = await supabase
+      .from("polls")
+      .insert({
+        question: "What path shall the brothers take first?",
+        options: ["Venture into the Whispering Woods", "Climb the Sun-Scorched Peaks"],
+        closes_at: new Date(Date.now() + 24 * 60 * 60 * 1000) // 24 hours
+      });
+    if (createPollError) {
+        log.error(createPollError, "[INIT] Failed to create initial poll.");
+    } else {
+        log.info("[INIT] Initial poll created successfully.");
+    }
+  }
+}
+
 // Middleware
 app.use(express.json());
 app.use(cookieParser());
-app.use(express.static("public")); // Serve static files
+app.use(express.static("public"));
 
-// Security middleware for API endpoints
 const authenticateAPI = (req: express.Request, res: express.Response, next: express.NextFunction) => {
-  // Skip authentication for GET requests to polls (public viewing)
   if (req.method === "GET" && req.path.startsWith("/polls")) {
     return next();
   }
-
   const token = req.headers.authorization?.replace("Bearer ", "") || req.headers["x-api-token"];
   const expectedToken = process.env.API_TOKEN;
-
   if (!expectedToken) {
     log.warn("API_TOKEN not configured - API endpoints are unprotected");
     return next();
   }
-
   if (!token || token !== expectedToken) {
     log.warn("Unauthorized API access attempt from %s", req.ip);
     return res.status(401).json({ error: "Unauthorized" });
   }
-
   next();
 };
 
@@ -43,85 +100,29 @@ app.use("/api", authenticateAPI as express.RequestHandler);
 app.use("/api", chaptersRouter);
 app.use("/polls", pollsRouter);
 
-// Health check endpoint
-app.get("/health", (req, res) => {
-  res.json({ 
-    status: "ok", 
-    timestamp: new Date().toISOString(),
-    version: "1.0.0"
-  });
-});
+app.get("/health", (req, res) => res.json({ status: "ok" }));
+app.get("/", (req, res) => res.sendFile("index.html", { root: "public" }));
 
-// Root endpoint
-app.get("/", (req, res) => {
-  res.sendFile("index.html", { root: "public" });
-});
-
-// Error handling middleware
 app.use((err: Error, req: express.Request, res: express.Response, next: express.NextFunction) => {
   log.error(err, "Unhandled error in request");
   res.status(500).json({ error: "Internal server error" });
 });
-
-const supabase = createClient(
-  process.env.SUPABASE_URL!,
-  process.env.SUPABASE_ANON_KEY!
-);
-
-async function ensureFirstPoll() {
-  log.info("[INIT] Checking for open polls on startup...");
-  const { data: polls, error } = await supabase
-    .from("polls")
-    .select("*")
-    .gt("closes_at", new Date().toISOString())
-    .order("closes_at", { ascending: true })
-    .limit(1);
-
-  if (error) {
-    log.error("[INIT] Error checking for open polls: %s", error.message || error);
-    return;
-  }
-
-  if (!polls || polls.length === 0) {
-    log.info("[INIT] No open polls found. Creating an initial poll...");
-    const pollDuration = 30 * 1000; // 30 seconds for testing
-    const { data, error: createError } = await supabase
-      .from("polls")
-      .insert({
-        question: "Should the Bald Brothers begin their epic quest?",
-        options: ["Yes, the saga must begin!", "No, let them rest."],
-        closes_at: new Date(Date.now() + pollDuration)
-      })
-      .select()
-      .single();
-    if (createError) {
-      log.error("[INIT] Failed to create first poll: %s", createError.message || createError);
-    } else {
-      log.info("[INIT] First poll created with ID %s", data.id);
-    }
-  } else {
-    log.info("[INIT] Open poll already exists with ID %s", polls[0].id);
-  }
-}
 
 // Start server
 app.listen(PORT, async () => {
   log.info("Bald Brothers Story Engine server started on port %d", PORT);
   log.info("Environment: %s", process.env.NODE_ENV || "development");
   
-  // Start the poll scheduler
+  // This is the only startup function we need.
+  await bootstrapStory();
+  
   startPollScheduler();
   
-  // Ensure the first poll exists
-  await ensureFirstPoll();
-  
-  // Log configuration status
   const requiredEnvVars = ["SUPABASE_URL", "SUPABASE_ANON_KEY", "OPENROUTER_API_KEY"];
   const missingVars = requiredEnvVars.filter(varName => !process.env[varName]);
   
   if (missingVars.length > 0) {
     log.warn("Missing required environment variables: %s", missingVars.join(", "));
-    log.info("Please check your .env file against .env.example");
   } else {
     log.info("All required environment variables are configured");
   }
