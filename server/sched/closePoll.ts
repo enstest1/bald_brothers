@@ -136,7 +136,7 @@ export async function closePollAndTally() {
     }
 
     const { count: postPollChapterCount } = await supabase.from('beats').select('*', { count: 'exact', head: true }).gt('authored_at', pollToProcess.closes_at);
-    if (postPollChapterCount > 0) {
+    if ((postPollChapterCount ?? 0) > 0) {
         log.info(`[Scheduler] Poll ${pollToProcess.id} has already been processed. Nothing to do.`);
         return;
     }
