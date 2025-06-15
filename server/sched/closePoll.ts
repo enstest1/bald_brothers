@@ -77,20 +77,23 @@ export async function closePollAndTally() {
         .single();
 
     if (error || !pollToProcess) {
-        log.info("[Scheduler] No closed polls to process. Checking for system start...");
+        // THIS IS THE BOOTSTRAP LOGIC FOR A FRESH START
         const { count } = await supabase.from('polls').select('*', { count: 'exact', head: true });
         if (count === 0) {
-            log.warn("[Scheduler] System is empty. Creating genesis chapter and first poll.");
+            log.warn("[Scheduler] System appears to be empty. Creating genesis chapter and first poll.");
             const genesisBody = "In the age of myth, where legends were forged... two brothers stood at a crossroads.\n\nOption 1: They venture into the Whispering Woods.\nOption 2: They climb the Sun-Scorched Peaks.";
             await supabase.from("beats").insert({ arc_id: "1", body: genesisBody });
             await createNextPoll();
+        } else {
+            log.info("[Scheduler] No closed polls to process. Waiting for an open poll to finish.");
         }
     } else {
+        // This is the normal loop for a running system
         log.info(`[Scheduler] Processing poll ID ${pollToProcess.id}`);
         await supabase.from('polls').update({ processed_at: new Date().toISOString() }).eq('id', pollToProcess.id);
         
         const { data: votes } = await supabase.from("votes").select("choice").eq("poll_id", pollToProcess.id);
-        const voteCounts = (pollToProcess.options as string[]).map((option, index) => ({ option, count: votes?.filter(v => v.choice === index).length || 0 }));
+        const voteCounts = (pollToProcess.options as string[]).map((option, index) => ({ option, count: votes?.filter((v: any) => v.choice === index).length || 0 }));
         const winner = voteCounts.reduce((a, b) => (b.count >= a.count ? b : a));
         log.info(`[Scheduler] Poll winner is "${winner.option}"`);
 
@@ -105,7 +108,7 @@ export async function closePollAndTally() {
         await createNextPoll();
     }
   } catch (e) {
-    log.error(e, "[Scheduler] Unhandled error in main cycle.");
+    if(e instanceof Error) log.error(e, "[Scheduler] Unhandled error in main cycle.");
   } finally {
     isProcessingPollClosure = false;
     log.info("[Scheduler] Cycle finished.");
