@@ -1,5 +1,5 @@
 import cron from "node-cron";
-import { createClient, PostgrestError } from "@supabase/supabase-js";
+import { createClient } from "@supabase/supabase-js";
 import { ChapterAgent } from "../../src/agents/chapterAgent";
 const log = require("pino")();
 
@@ -10,84 +10,61 @@ const supabase = createClient(
 
 let isProcessingPollClosure = false;
 
-// --- Helper Functions ---
+// This function now ONLY creates a poll. It does not call the AI.
+async function createNextPoll() {
+  log.info("[Scheduler] Creating the next poll...");
+  const { data: latestChapter } = await supabase
+    .from("beats")
+    .select("body")
+    .order("authored_at", { ascending: false })
+    .limit(1)
+    .single();
 
-async function generateAndSaveChapter(prompt: string): Promise<boolean> {
-  log.info("[Scheduler] Generating new chapter...");
-  try {
-    const result = await ChapterAgent.run(prompt);
-    const chapterBody = (result.success && result.output) ? result.output as string : '';
+  if (!latestChapter) {
+    log.error("[Scheduler] CRITICAL: No chapter found to base the next poll on. Aborting poll creation.");
+    return;
+  }
+  
+  // Simple, deterministic poll generation.
+  // We will assume the AI chapter ends with two choices on separate lines.
+  const chapterLines = latestChapter.body.split('\n').filter((line: string) => line.trim() !== '');
+  let choices = [
+      "The brothers take a moment to reflect on their journey.",
+      "An unexpected event throws their plans into chaos."
+  ]; // Fallback choices
+  
+  if (chapterLines.length >= 2) {
+      choices = [chapterLines[chapterLines.length - 2], chapterLines[chapterLines.length - 1]];
+  }
+  
+  const question = "What happens next?";
 
-    if (chapterBody.length < 20) {
-      throw new Error("AI output was too short or failed.");
-    }
+  const { data: newPoll } = await supabase
+    .from("polls")
+    .insert({
+        question,
+        options: choices,
+        closes_at: new Date(Date.now() + 120000) // 2 minutes for robust testing
+    })
+    .select("id")
+    .single();
     
-    const { error } = await supabase.from("beats").insert({ arc_id: "1", body: chapterBody });
-    if (error) throw error;
-
-    log.info("[Scheduler] Chapter saved successfully.");
-    return true;
-  } catch (error) {
-    log.error(error, "[Scheduler] Error during chapter generation. Saving fallback chapter.");
-    const fallbackBody = 'The Bald Brothers continue their journey, but the details are lost to legend. The story will resume with the next decision.';
-    await supabase.from("beats").insert({ arc_id: "1", body: fallbackBody });
-    return true; // Still return true to allow the loop to continue.
+  if (newPoll) {
+    log.info(`[Scheduler] New poll created with ID ${newPoll.id}`);
+  } else {
+    log.error("[Scheduler] Failed to insert new poll into database.");
   }
 }
 
-async function createTwoChoicePoll(): Promise<void> {
-    log.info("[Scheduler] Creating a new two-choice poll...");
-    
-    const { data: latestChapter, error: chapterError } = await supabase
-        .from("beats").select("body").order("authored_at", { ascending: false }).limit(1).single();
-    
-    if (chapterError || !latestChapter) {
-        log.error(chapterError || new Error("No chapter found to base poll on."), "[Scheduler] CRITICAL: Cannot create next poll.");
-        return;
-    }
-
-    let question = "What path should the Bald Brothers take?";
-    let choices = ["Seek the ancient bald scrolls in the dark temple", "Train with the wise bald masters in the mountains"];
-    
-    try {
-        const pollPrompt = `Based on this chapter:\n"${latestChapter.body}"\n\nGenerate a poll with two different, exciting story options for the next chapter. Format the response as a JSON object with keys "question" and "choices" (an array of two strings).`;
-        const result = await ChapterAgent.run(pollPrompt);
-        if(result.success && result.output) {
-            const parsed = JSON.parse(result.output as string);
-            question = parsed.question;
-            choices = parsed.choices;
-        }
-    } catch (e) { log.error(e, "[Scheduler] Error generating AI poll options, using fallback."); }
-
-    const { data: newPoll } = await supabase.from("polls").insert({ question, options: choices, closes_at: new Date(Date.now() + 120000) }).select("id").single();
-    if (newPoll) {
-        log.info(`[Scheduler] New two-choice poll created with ID ${newPoll.id}`);
-    } else {
-        log.error("[Scheduler] Failed to insert new poll into database.");
-    }
-}
-
-async function createNextPoll(): Promise<void> {
-    log.info("[Scheduler] Creating the next poll...");
-    // Ensure a chapter exists. If not, create the genesis chapter.
-    const { count: chapterCount } = await supabase.from("beats").select('*', { count: 'exact', head: true });
-    if (chapterCount === 0) {
-        log.warn("[Scheduler] No chapters exist. Creating genesis chapter to start the story.");
-        const genesisBody = "In the age of myth, where legends were forged in the crucible of destiny, two brothers, known only by their gleaming crowns of flesh, stood at a crossroads. The world, vast and unknowing, awaited their first, fateful decision. This is the beginning of the Bald Brothers' saga.";
-        await supabase.from("beats").insert({ arc_id: "1", body: genesisBody });
-    }
-    await createTwoChoicePoll();
-}
-
-// --- Main Scheduler Logic ---
-
+// Main scheduler logic
 export async function closePollAndTally() {
   if (isProcessingPollClosure) {
-    log.warn("[Scheduler] Poll closure is already running. Skipping.");
+    log.warn("[Scheduler] Cycle already running. Skipping.");
     return;
   }
   isProcessingPollClosure = true;
-  log.info("[Scheduler] Starting poll closure cycle...");
+  log.info("--------------------");
+  log.info("[Scheduler] Starting new cycle...");
 
   try {
     const { data: pollToProcess, error } = await supabase
@@ -100,35 +77,39 @@ export async function closePollAndTally() {
         .single();
 
     if (error || !pollToProcess) {
-        log.info("[Scheduler] No unprocessed closed polls found. Checking if a new poll needs to be created.");
-        const { count: openPollCount } = await supabase.from('polls').select('*', { count: 'exact', head: true }).gt('closes_at', new Date().toISOString());
-        if (openPollCount === 0) {
-            log.warn("[Scheduler] No open polls found. Creating a new one to unstick the system.");
+        log.info("[Scheduler] No closed polls to process. Checking for system start...");
+        const { count } = await supabase.from('polls').select('*', { count: 'exact', head: true });
+        if (count === 0) {
+            log.warn("[Scheduler] System is empty. Creating genesis chapter and first poll.");
+            const genesisBody = "In the age of myth, where legends were forged... two brothers stood at a crossroads.\n\nOption 1: They venture into the Whispering Woods.\nOption 2: They climb the Sun-Scorched Peaks.";
+            await supabase.from("beats").insert({ arc_id: "1", body: genesisBody });
             await createNextPoll();
         }
     } else {
-        log.info(`[Scheduler] Found unprocessed poll to process: ID ${pollToProcess.id}`);
+        log.info(`[Scheduler] Processing poll ID ${pollToProcess.id}`);
         await supabase.from('polls').update({ processed_at: new Date().toISOString() }).eq('id', pollToProcess.id);
         
         const { data: votes } = await supabase.from("votes").select("choice").eq("poll_id", pollToProcess.id);
         const voteCounts = (pollToProcess.options as string[]).map((option, index) => ({ option, count: votes?.filter(v => v.choice === index).length || 0 }));
         const winner = voteCounts.reduce((a, b) => (b.count >= a.count ? b : a));
-        log.info(`[Scheduler] Poll winner is "${winner.option}" with ${winner.count} votes.`);
+        log.info(`[Scheduler] Poll winner is "${winner.option}"`);
 
         const { data: latestChapter } = await supabase.from("beats").select("body").order("authored_at", { ascending: false }).limit(1).single();
-        const prompt = `The last chapter was:\n"${latestChapter?.body}"\n\nThe community voted for the story to continue with the following direction: "${winner.option}".\n\nWrite the next chapter of the Bald Brothers saga incorporating this choice.`;
+        const prompt = `The story so far:\n"${latestChapter?.body}"\n\nThe community voted for this to happen next: "${winner.option}".\n\nWrite the next part of the story, making sure to end it with two new, distinct choices for the next poll, each on its own line.`;
         
-        if (await generateAndSaveChapter(prompt)) {
-            await createNextPoll();
-        } else {
-            log.error("[Scheduler] Chapter saving failed, will not create a new poll this cycle.");
-        }
+        const result = await ChapterAgent.run(prompt);
+        const newChapterBody = (result.success && result.output) ? result.output as string : 'The story is lost in the mists of time...';
+        await supabase.from("beats").insert({ arc_id: "1", body: newChapterBody });
+        log.info("[Scheduler] New chapter saved.");
+
+        await createNextPoll();
     }
-  } catch (error) {
-    log.error(error, "[Scheduler] Unhandled error in closePollAndTally");
+  } catch (e) {
+    log.error(e, "[Scheduler] Unhandled error in main cycle.");
   } finally {
     isProcessingPollClosure = false;
-    log.info("[Scheduler] Finished poll closure cycle.");
+    log.info("[Scheduler] Cycle finished.");
+    log.info("--------------------");
   }
 }
 
