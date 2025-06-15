@@ -165,15 +165,16 @@
         `;
     }
 
-    function renderVotedState() {
+    function renderVotedState(countdown) {
         isWaitingForNextState = true;
         currentPollDiv.innerHTML = `
             <h2>Thank you for voting!</h2>
             <p>The Bald Brothers' destiny is being forged...</p>
             <p>A new chapter is being written. Please wait...</p>
+            <div id="countdown-timer" style="margin-top: 1rem; font-weight: bold;">Next update in ${countdown}s</div>
         `;
     }
-
+    
     // --- Core Logic ---
     async function fetchLatestChapter() {
         try {
@@ -195,7 +196,6 @@
 
     async function fetchOpenPoll() {
         if (isWaitingForNextState) return;
-
         try {
             const response = await fetch('/polls/open');
             if (!response.ok) throw new Error('Poll fetch failed');
@@ -214,15 +214,15 @@
 
     async function vote(choiceIndex, pollId) {
         if (isWaitingForNextState) return;
-        renderVotedState();
-
+        renderVotedState(40); // Start a visual 40-second countdown
+        
         try {
             await fetch(`/polls/${pollId}/vote`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ choice: choiceIndex })
             });
-            // After voting, start checking for the next state.
+            // After voting, start polling for the new state.
             setTimeout(() => lookForNewState(pollId), 5000); // Start checking after 5 seconds
         } catch (error) {
             console.error('Error submitting vote:', error);
@@ -232,13 +232,18 @@
         }
     }
     
-    // This function will run until a new poll appears.
+    // This function runs until a new poll appears.
     function lookForNewState(votedPollId) {
         console.log(`Looking for a new poll that is NOT ${votedPollId}`);
         let attempts = 0;
-        const maxAttempts = 10; // Try for 50 seconds max
+        const maxAttempts = 8; // Try for 40 seconds max (8 * 5s)
+        let countdown = 35; // Visual countdown
 
         const interval = setInterval(async () => {
+            const timerDiv = document.getElementById('countdown-timer');
+            if (timerDiv) timerDiv.textContent = `Next update in ${countdown}s`;
+            countdown -= 5;
+            
             attempts++;
             if (attempts > maxAttempts) {
                 console.error("Timeout: New state not found. Reloading page as a fallback.");
@@ -247,23 +252,26 @@
                 return;
             }
 
-            const response = await fetch('/polls/open');
-            const data = await response.json();
-
-            if (data.poll && data.poll.id !== votedPollId) {
-                // A new poll is ready! Stop checking and re-initialize the page.
-                console.log(`New state found! Poll ID: ${data.poll.id}`);
-                clearInterval(interval);
-                isWaitingForNextState = false;
-                initialize();
-            } else {
-                console.log("Still waiting for new poll...");
+            try {
+                const response = await fetch('/polls/open');
+                const data = await response.json();
+                if (data.poll && data.poll.id !== votedPollId) {
+                    console.log(`New state found! Poll ID: ${data.poll.id}`);
+                    clearInterval(interval);
+                    isWaitingForNextState = false;
+                    initialize();
+                } else {
+                    console.log("Still waiting for new poll...");
+                }
+            } catch (e) {
+                console.error("Error while looking for new state: ", e);
             }
         }, 5000); // Check every 5 seconds
     }
 
     // --- Initial Load ---
     function initialize() {
+        isWaitingForNextState = false;
         console.log("Initializing UI state...");
         renderLoadingState('story');
         renderLoadingState('poll');
