@@ -139,7 +139,6 @@
 
     let currentPollId = null;
     let isWaitingForNextState = false;
-    let pollIdToVoteOn = null;
 
     // --- State Rendering Functions ---
     function renderLoadingState(section) {
@@ -229,7 +228,6 @@
 
     async function vote(choiceIndex, pollId) {
         if (isWaitingForNextState) return;
-        pollIdToVoteOn = pollId;
         renderVotedState();
 
         try {
@@ -238,7 +236,7 @@
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ choice: choiceIndex })
             });
-            setTimeout(() => lookForNewState(pollId), 5000);
+            lookForNewState(pollId);
         } catch (error) {
             console.error('Error submitting vote:', error);
             alert('Failed to submit vote. Please try again.');

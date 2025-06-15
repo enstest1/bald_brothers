@@ -46,31 +46,6 @@ async function bootstrapStory() {
   } else {
     log.info(`[INIT] Found ${chapterCount} existing chapters. Bootstrap not needed.`);
   }
-
-  // 2. Check if an open poll exists.
-  const { data: openPoll } = await supabase
-    .from("polls")
-    .select("id")
-    .gt("closes_at", new Date().toISOString())
-    .limit(1)
-    .single();
-
-  // If no open poll exists, create the first two-choice poll.
-  if (!openPoll) {
-    log.info("[INIT] No open polls found. Creating an initial poll...");
-    const { error: createPollError } = await supabase
-      .from("polls")
-      .insert({
-        question: "Should the Bald Brothers begin their epic quest?",
-        options: ["Yes, the saga must begin!", "No, let them rest."],
-        closes_at: new Date(Date.now() + 40000)
-      });
-    if (createPollError) {
-        log.error(createPollError, "[INIT] Failed to create initial poll.");
-    } else {
-        log.info("[INIT] Initial poll created successfully.");
-    }
-  }
 }
 
 // Middleware
