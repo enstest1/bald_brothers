@@ -11,9 +11,10 @@ const supabase = createClient(
   process.env.SUPABASE_ANON_KEY!
 );
 
+// This is our hardcoded first chapter, which acts as the genesis block.
 const GENESIS_CHAPTER = {
   title: "Chapter 1: The Quest Begins",
-  body: "In the age of myth, where legends were forged in the crucible of destiny, two brothers, known only by their gleaming crowns of flesh, stood at a crossroads. The world, vast and unknowing, awaited their first, fateful decision. This is the beginning of the Bald Brothers' saga."
+  body: "In the age of myth, where legends were forged in the crucible of destiny, two brothers, known only by their gleaming crowns of flesh, stood at a crossroads. The world, vast and unknowing, awaited their first, fateful decision."
 };
 
 router.post("/worlds/:id/arcs/:arcId/progress", async (req, res) => {
@@ -74,7 +75,7 @@ router.get("/beats/latest", async (req, res) => {
   try {
     const { data: chapters, error } = await supabase
       .from("beats")
-      .select("id, body, authored_at")
+      .select("id, body")
       .order("authored_at", { ascending: false })
       .limit(1);
 
@@ -84,12 +85,11 @@ router.get("/beats/latest", async (req, res) => {
     }
     
     if (!chapters || chapters.length === 0) {
+      log.info("No chapters found in DB, serving genesis chapter.");
       return res.json(GENESIS_CHAPTER);
     }
     
     const { count } = await supabase.from("beats").select('*', { count: 'exact', head: true });
-    
-    // Add 1 to the count to account for the un-stored genesis chapter
     const chapterNumber = (count ?? 0) + 1;
     
     res.json({ title: `Chapter ${chapterNumber}: The Saga Continues`, body: chapters[0].body });
