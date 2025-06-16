@@ -8,6 +8,9 @@ const supabase = createClient(
   process.env.SUPABASE_ANON_KEY!
 );
 
+// Define the hardcoded genesis chapter body here so the scheduler knows the story's true beginning.
+const GENESIS_CHAPTER_BODY = "In the age of myth, where legends were forged in the crucible of destiny, two brothers, known only by their gleaming crowns of flesh, stood at a crossroads. The world, vast and unknowing, awaited their first, fateful decision.";
+
 let isProcessingPollClosure = false;
 
 async function createNextPoll(newChapterBody: string) {
@@ -56,7 +59,11 @@ export async function closePollAndTally() {
         log.info(`[Scheduler] Poll winner is "${winner.option}"`);
 
         const { data: latestChapter } = await supabase.from("beats").select("body").order("authored_at", { ascending: false }).limit(1).single();
-        const prompt = `The story so far:\n"${latestChapter?.body}"\n\nThe community voted for this to happen next: "${winner.option}".\n\nWrite the next chapter of the story, making sure it ends with two new, distinct choices for the next poll, each on its own line.`;
+        
+        // If no chapter exists in the database, use the Genesis Chapter as context. Otherwise, use the latest one.
+        const storyContext = latestChapter?.body || GENESIS_CHAPTER_BODY;
+
+        const prompt = `The story so far:\n"${storyContext}"\n\nThe community voted for this to happen next: "${winner.option}".\n\nWrite the next chapter of the story, making sure it ends with two new, distinct choices for the next poll, each on its own line.`;
         
         const result = await ChapterAgent.run(prompt);
         const newChapterBody = (result.success && result.output) ? result.output as string : 'The story is lost in the mists of time...';
@@ -87,7 +94,7 @@ if (require.main === module) {
     log.info("Manual poll closure completed");
     process.exit(0);
   }).catch((error) => {
-    log.error((error as any)?.message || String(error), "Manual poll closure failed");
+    log.error(error instanceof Error ? error.message : String(error), "Manual poll closure failed");
     process.exit(1);
   });
 }

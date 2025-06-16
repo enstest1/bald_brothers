@@ -1608,219 +1608,6 @@ A solid understanding of these technologies is key to contributing effectively t
   through the Bootoshi Cloud integration!
 </file>
 
-<file path="Docs/update.md">
-Yes, I see exactly what's happening. Your analysis is spot on. The backend logs show a perfect, healthy cycle, but the frontend is not reflecting it.
-You are correct. The issue stems from the polls closing before you get a chance to interact with them, combined with a subtle logic flaw in how the frontend checks for new polls.
-Here is the final, definitive set of changes to fix this and give you a stable testing environment.
-Diagnosis: The Root of the Loop
-Polls Close Too Fast: With a 30-second poll duration and a 35-second scheduler check, the very first poll you see on the website is already closed or will close within seconds.
-Frontend State Bug: When you vote on a poll that the backend has already processed, the frontend gets stuck. It's waiting for a new poll to appear, but the backend has already moved on. The lookForNewState function is trying to compare against a poll ID that is now old news.
-The Solution: Synchronize Timers and Refine Frontend Logic
-We will make two precise changes: one to the backend to create a stable testing window, and one to the frontend to make it smarter.
-Step 1: Create a Stable Testing Environment (Backend)
-We'll set the poll duration to be longer than the scheduler interval. This guarantees you always have a window to vote before the backend processes the poll.
-File: server/sched/closePoll.ts
-In the createNextPoll() function, change the poll duration.
-// In server/sched/closePoll.ts, inside createNextPoll()
-// ...
-const { data: newPoll, error: newPollError } = await supabase
-    .from("polls")
-    .insert({
-        question,
-        options: choices,
-        // Give polls a 40-second life, longer than the 35s scheduler
-        closes_at: new Date(Date.now() + 40000) 
-    })
-// ...
-Use code with caution.
-TypeScript
-File: server.ts
-Do the same for the bootstrap poll.
-// In server.ts, inside bootstrapStory()
-// ...
-if (!openPoll) {
-    // ...
-    const { error: createPollError } = await supabase
-      .from("polls")
-      .insert({
-        question: "Should the Bald Brothers begin their epic quest?",
-        options: ["Yes, the saga must begin!", "No, let them rest."],
-         // Give polls a 40-second life, longer than the 35s scheduler
-        closes_at: new Date(Date.now() + 40000)
-      });
-    // ...
-}
-Use code with caution.
-TypeScript
-Now, every poll will last 40 seconds, and the scheduler will check every 35 seconds. This gives you a guaranteed window to vote.
-Step 2: Make the Frontend Smarter (public/index.html)
-This is the most important fix. We will update the vote function so that it doesn't get confused if you vote on a poll that has just closed.
-Replace the entire <script> tag at the bottom of public/index.html with this final, robust version:
-<script>
-    const storyHeading = document.getElementById('story-heading');
-    const chapterContent = document.getElementById('chapter-content');
-    const currentPollDiv = document.getElementById('current-poll');
-
-    let currentPollId = null;
-    let isWaitingForNextState = false;
-
-    // --- State Rendering Functions ---
-    function renderLoadingState(section) {
-        if (section === 'story') {
-            storyHeading.textContent = 'Loading The Saga...';
-            chapterContent.innerHTML = '<p>The chronicles of the Bald Brotherhood are being transcribed...</p>';
-        } else if (section === 'poll') {
-            currentPollDiv.innerHTML = '<h2>Searching for the next path...</h2><p><small>The fates are aligning.</small></p>';
-        }
-    }
-
-    function renderPoll(poll) {
-        if (isWaitingForNextState) return;
-        currentPollId = poll.id;
-        let timeLeft = Math.round((new Date(poll.closes_at) - new Date()) / 1000);
-        
-        currentPollDiv.innerHTML = `
-            <h2>Current Poll</h2>
-            <p><strong>${poll.question}</strong></p>
-            <div class="poll-options">
-              ${poll.options.map((option, index) => `
-                <button onclick="vote(${index}, '${poll.id}')">${option}</button>
-              `).join('')}
-            </div>
-            <p><small>A new path will be chosen in <span id="poll-countdown">${timeLeft > 0 ? timeLeft : 0}</span>s...</small></p>
-        `;
-
-        // Countdown timer for the poll itself
-        const countdownSpan = document.getElementById('poll-countdown');
-        const pollTimer = setInterval(() => {
-            if (countdownSpan) {
-                timeLeft--;
-                countdownSpan.textContent = timeLeft > 0 ? timeLeft : 0;
-                if (timeLeft <= 0) clearInterval(pollTimer);
-            } else {
-                clearInterval(pollTimer);
-            }
-        }, 1000);
-    }
-
-    function renderVotedState() {
-        isWaitingForNextState = true;
-        currentPollDiv.innerHTML = `
-            <h2>Thank you for voting!</h2>
-            <p>The Bald Brothers' destiny is being forged...</p>
-            <p>A new chapter is being written. Please wait...</p>
-        `;
-    }
-    
-    // --- Core Logic ---
-    async function fetchLatestChapter() {
-        try {
-            const response = await fetch('/api/beats/latest');
-            const data = await response.json();
-            if (!response.ok) {
-                storyHeading.textContent = 'The Story Begins...';
-                chapterContent.innerHTML = `<p>${data.body || "The chronicles are about to be written..."}</p>`;
-            } else {
-                storyHeading.textContent = data.title || "A New Chapter Unfolds";
-                chapterContent.innerHTML = `<p>${data.body.replace(/\n/g, '<br>')}</p>`;
-            }
-        } catch (error) {
-            console.error('Error fetching chapter:', error);
-            storyHeading.textContent = 'Error Loading Story';
-            chapterContent.innerHTML = '<p>Could not load the latest chapter. Please refresh the page.</p>';
-        }
-    }
-
-    async function fetchOpenPoll() {
-        if (isWaitingForNextState) return;
-        try {
-            const response = await fetch('/polls/open');
-            if (!response.ok) throw new Error('Poll fetch failed');
-            const data = await response.json();
-            
-            if (data.poll) {
-                renderPoll(data.poll);
-            } else {
-                renderLoadingState('poll');
-                setTimeout(fetchOpenPoll, 5000); // If no poll, check again in 5s
-            }
-        } catch (error) {
-            console.error('Error loading poll:', error);
-            currentPollDiv.innerHTML = '<h2>Error loading poll.</h2>';
-        }
-    }
-
-    async function vote(choiceIndex, pollId) {
-        if (isWaitingForNextState) return;
-        renderVotedState();
-
-        try {
-            // Send the vote, but we don't need to wait for the response.
-            fetch(`/polls/${pollId}/vote`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ choice: choiceIndex })
-            });
-
-            // Immediately start looking for the next state.
-            lookForNewState(pollId);
-        } catch (error) {
-            console.error('Error submitting vote:', error);
-            alert('Failed to submit vote. Please try again.');
-            isWaitingForNextState = false;
-            fetchOpenPoll();
-        }
-    }
-    
-    // This function runs until a new poll appears.
-    function lookForNewState(votedPollId) {
-        console.log(`Waiting for a new poll (that is not ${votedPollId})`);
-        const interval = setInterval(async () => {
-            try {
-                const response = await fetch('/polls/open');
-                const data = await response.json();
-                if (data.poll && data.poll.id !== votedPollId) {
-                    // A new poll is ready! Stop checking and re-initialize the page.
-                    console.log(`New state found! Poll ID: ${data.poll.id}`);
-                    clearInterval(interval);
-                    isWaitingForNextState = false;
-                    initialize();
-                } else {
-                    console.log("Still waiting for new poll...");
-                }
-            } catch(e) {
-                console.error("Error while looking for new state:", e);
-            }
-        }, 5000); // Check every 5 seconds
-    }
-
-    // --- Initial Load ---
-    function initialize() {
-        console.log("Initializing UI state...");
-        renderLoadingState('story');
-        renderLoadingState('poll');
-        
-        fetchLatestChapter();
-        fetchOpenPoll();
-    }
-
-    initialize();
-</script>
-Use code with caution.
-Html
-What This Final Version Does
-Synchronized Timers: The backend polls now last 40 seconds, while the scheduler checks every 35 seconds. This gives you a clear window to vote.
-Live Poll Countdown: The frontend now displays a live countdown for each poll, so users know exactly how much time they have.
-Robust State Checking: The lookForNewState function is now much smarter. After you vote, it will patiently check every 5 seconds until the backend has finished its work and created a new poll with a different ID. This completely eliminates the looping bug.
-Final Instructions (This is it!)
-Clear the Database: Run DELETE FROM votes; DELETE FROM polls; DELETE FROM beats; one last time in Supabase.
-Apply Code Changes:
-Update the closes_at values in server.ts and server/sched/closePoll.ts.
-Replace the entire <script> in public/index.html.
-Deploy: Commit and push.
-Your system will now work as intended, with clear timers and a smooth, logical progression from one story beat to the next.
-</file>
-
 <file path="howtorun.md">
 # How to Run the Bald Brothers Story Engine - Complete Beginner's Guide
 
@@ -2352,101 +2139,217 @@ Remember: Every expert was once a beginner. Take your time, follow each step car
 **🎉 You did it! Your Bald Brothers Story Engine is now live on the internet, automatically generating chapters and engaging your community with polls. Welcome to the future of interactive storytelling!**
 </file>
 
-<file path="server/routes/chapters.ts">
-import express from "express";
-import { createClient } from "@supabase/supabase-js";
-import { ChapterAgent } from "../../src/agents/chapterAgent";
-const log = require("pino")();
-
-const router = express.Router();
-
-// Initialize Supabase client
-const supabase = createClient(
-  process.env.SUPABASE_URL!,
-  process.env.SUPABASE_ANON_KEY!
-);
-
-router.post("/worlds/:id/arcs/:arcId/progress", async (req, res) => {
-  try {
-    log.info("Starting chapter generation for arc %s", req.params.arcId);
-
-    // Fetch context for the agent
-    const { data: previousChapters } = await supabase
-      .from("beats")
-      .select("body")
-      .order("authored_at", { ascending: false })
-      .limit(3);
-
-    const { data: lastPollResult } = await supabase
+<file path="Docs/update.md">
+Yes, I see exactly what's happening. Your analysis is spot on. The backend logs show a perfect, healthy cycle, but the frontend is not reflecting it.
+You are correct. The issue stems from the polls closing before you get a chance to interact with them, combined with a subtle logic flaw in how the frontend checks for new polls.
+Here is the final, definitive set of changes to fix this and give you a stable testing environment.
+Diagnosis: The Root of the Loop
+Polls Close Too Fast: With a 30-second poll duration and a 35-second scheduler check, the very first poll you see on the website is already closed or will close within seconds.
+Frontend State Bug: When you vote on a poll that the backend has already processed, the frontend gets stuck. It's waiting for a new poll to appear, but the backend has already moved on. The lookForNewState function is trying to compare against a poll ID that is now old news.
+The Solution: Synchronize Timers and Refine Frontend Logic
+We will make two precise changes: one to the backend to create a stable testing window, and one to the frontend to make it smarter.
+Step 1: Create a Stable Testing Environment (Backend)
+We'll set the poll duration to be longer than the scheduler interval. This guarantees you always have a window to vote before the backend processes the poll.
+File: server/sched/closePoll.ts
+In the createNextPoll() function, change the poll duration.
+// In server/sched/closePoll.ts, inside createNextPoll()
+// ...
+const { data: newPoll, error: newPollError } = await supabase
+    .from("polls")
+    .insert({
+        question,
+        options: choices,
+        // Give polls a 40-second life, longer than the 35s scheduler
+        closes_at: new Date(Date.now() + 40000) 
+    })
+// ...
+Use code with caution.
+TypeScript
+File: server.ts
+Do the same for the bootstrap poll.
+// In server.ts, inside bootstrapStory()
+// ...
+if (!openPoll) {
+    // ...
+    const { error: createPollError } = await supabase
       .from("polls")
-      .select("question, options")
-      .order("closes_at", { ascending: false })
-      .limit(1);
+      .insert({
+        question: "Should the Bald Brothers begin their epic quest?",
+        options: ["Yes, the saga must begin!", "No, let them rest."],
+         // Give polls a 40-second life, longer than the 35s scheduler
+        closes_at: new Date(Date.now() + 40000)
+      });
+    // ...
+}
+Use code with caution.
+TypeScript
+Now, every poll will last 40 seconds, and the scheduler will check every 35 seconds. This gives you a guaranteed window to vote.
+Step 2: Make the Frontend Smarter (public/index.html)
+This is the most important fix. We will update the vote function so that it doesn't get confused if you vote on a poll that has just closed.
+Replace the entire <script> tag at the bottom of public/index.html with this final, robust version:
+<script>
+    const storyHeading = document.getElementById('story-heading');
+    const chapterContent = document.getElementById('chapter-content');
+    const currentPollDiv = document.getElementById('current-poll');
 
-    const prompt = `
-      Continue the story based on the context.
-      Previous Chapters: ${JSON.stringify(previousChapters)}
-      Last Poll: ${JSON.stringify(lastPollResult)}
-      Generate the next chapter in the Bald Brothers saga.
-    `;
-    
-    const result = await ChapterAgent.run(prompt);
-    
-    if (!result.success || !result.output || (result.output as string).length < 20) {
-      log.error("Chapter generation failed: %o", result);
-      return res.status(500).json({ error: "Chapter generation failed" });
+    let currentPollId = null;
+    let isWaitingForNextState = false;
+
+    // --- State Rendering Functions ---
+    function renderLoadingState(section) {
+        if (section === 'story') {
+            storyHeading.textContent = 'Loading The Saga...';
+            chapterContent.innerHTML = '<p>The chronicles of the Bald Brotherhood are being transcribed...</p>';
+        } else if (section === 'poll') {
+            currentPollDiv.innerHTML = '<h2>Searching for the next path...</h2><p><small>The fates are aligning.</small></p>';
+        }
     }
 
-    const output = result.output as string;
-    log.info("Chapter generated %d chars", output.length);
-    
-    const { data, error } = await supabase.from("beats").insert({
-      arc_id: req.params.arcId,
-      body: output,
-      authored_at: new Date()
-    }).select().single();
+    function renderPoll(poll) {
+        if (isWaitingForNextState) return;
+        currentPollId = poll.id;
+        let timeLeft = Math.round((new Date(poll.closes_at) - new Date()) / 1000);
+        
+        currentPollDiv.innerHTML = `
+            <h2>Current Poll</h2>
+            <p><strong>${poll.question}</strong></p>
+            <div class="poll-options">
+              ${poll.options.map((option, index) => `
+                <button onclick="vote(${index}, '${poll.id}')">${option}</button>
+              `).join('')}
+            </div>
+            <p><small>A new path will be chosen in <span id="poll-countdown">${timeLeft > 0 ? timeLeft : 0}</span>s...</small></p>
+        `;
 
-    if (error) {
-      log.error(error, "Failed to save chapter to Supabase");
-      return res.status(500).json({ error: "Failed to save chapter" });
+        // Countdown timer for the poll itself
+        const countdownSpan = document.getElementById('poll-countdown');
+        const pollTimer = setInterval(() => {
+            if (countdownSpan) {
+                timeLeft--;
+                countdownSpan.textContent = timeLeft > 0 ? timeLeft : 0;
+                if (timeLeft <= 0) clearInterval(pollTimer);
+            } else {
+                clearInterval(pollTimer);
+            }
+        }, 1000);
     }
 
-    log.info("Chapter successfully saved to database with ID %s", data.id);
-    res.json({ ok: true, body: output, id: data.id });
-  } catch (error) {
-    log.error(error, "Error in chapter generation endpoint");
-    res.status(500).json({ error: "Internal server error" });
-  }
-});
-
-// Add endpoint to get the latest chapter
-router.get("/beats/latest", async (req, res) => {
-  try {
-    const { data: chapters, error } = await supabase
-      .from("beats")
-      .select("id, body, authored_at")
-      .order("authored_at", { ascending: false })
-      .limit(1);
-
-    if (error) {
-      log.error(error, "Failed to fetch latest chapter");
-      return res.status(500).json({ error: "Failed to fetch latest chapter" });
+    function renderVotedState() {
+        isWaitingForNextState = true;
+        currentPollDiv.innerHTML = `
+            <h2>Thank you for voting!</h2>
+            <p>The Bald Brothers' destiny is being forged...</p>
+            <p>A new chapter is being written. Please wait...</p>
+        `;
     }
     
-    if (!chapters || chapters.length === 0) {
-      return res.status(404).json({ title: "No chapters yet", body: "The story has not begun." });
+    // --- Core Logic ---
+    async function fetchLatestChapter() {
+        try {
+            const response = await fetch('/api/beats/latest');
+            const data = await response.json();
+            if (!response.ok) {
+                storyHeading.textContent = 'The Story Begins...';
+                chapterContent.innerHTML = `<p>${data.body || "The chronicles are about to be written..."}</p>`;
+            } else {
+                storyHeading.textContent = data.title || "A New Chapter Unfolds";
+                chapterContent.innerHTML = `<p>${data.body.replace(/\n/g, '<br>')}</p>`;
+            }
+        } catch (error) {
+            console.error('Error fetching chapter:', error);
+            storyHeading.textContent = 'Error Loading Story';
+            chapterContent.innerHTML = '<p>Could not load the latest chapter. Please refresh the page.</p>';
+        }
+    }
+
+    async function fetchOpenPoll() {
+        if (isWaitingForNextState) return;
+        try {
+            const response = await fetch('/polls/open');
+            if (!response.ok) throw new Error('Poll fetch failed');
+            const data = await response.json();
+            
+            if (data.poll) {
+                renderPoll(data.poll);
+            } else {
+                renderLoadingState('poll');
+                setTimeout(fetchOpenPoll, 5000); // If no poll, check again in 5s
+            }
+        } catch (error) {
+            console.error('Error loading poll:', error);
+            currentPollDiv.innerHTML = '<h2>Error loading poll.</h2>';
+        }
+    }
+
+    async function vote(choiceIndex, pollId) {
+        if (isWaitingForNextState) return;
+        renderVotedState();
+
+        try {
+            // Send the vote, but we don't need to wait for the response.
+            fetch(`/polls/${pollId}/vote`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ choice: choiceIndex })
+            });
+
+            // Immediately start looking for the next state.
+            lookForNewState(pollId);
+        } catch (error) {
+            console.error('Error submitting vote:', error);
+            alert('Failed to submit vote. Please try again.');
+            isWaitingForNextState = false;
+            fetchOpenPoll();
+        }
     }
     
-    const chapterNumber = (await supabase.from("beats").select('*', { count: 'exact', head: true })).count ?? 1;
-    
-    res.json({ title: `Chapter ${chapterNumber}: The Saga Continues`, body: chapters[0].body });
-  } catch (err) {
-    log.error(err, "Error fetching latest chapter");
-    res.status(500).json({ error: "Internal server error" });
-  }
-});
+    // This function runs until a new poll appears.
+    function lookForNewState(votedPollId) {
+        console.log(`Waiting for a new poll (that is not ${votedPollId})`);
+        const interval = setInterval(async () => {
+            try {
+                const response = await fetch('/polls/open');
+                const data = await response.json();
+                if (data.poll && data.poll.id !== votedPollId) {
+                    // A new poll is ready! Stop checking and re-initialize the page.
+                    console.log(`New state found! Poll ID: ${data.poll.id}`);
+                    clearInterval(interval);
+                    isWaitingForNextState = false;
+                    initialize();
+                } else {
+                    console.log("Still waiting for new poll...");
+                }
+            } catch(e) {
+                console.error("Error while looking for new state:", e);
+            }
+        }, 5000); // Check every 5 seconds
+    }
 
-export default router;
+    // --- Initial Load ---
+    function initialize() {
+        console.log("Initializing UI state...");
+        renderLoadingState('story');
+        renderLoadingState('poll');
+        
+        fetchLatestChapter();
+        fetchOpenPoll();
+    }
+
+    initialize();
+</script>
+Use code with caution.
+Html
+What This Final Version Does
+Synchronized Timers: The backend polls now last 40 seconds, while the scheduler checks every 35 seconds. This gives you a clear window to vote.
+Live Poll Countdown: The frontend now displays a live countdown for each poll, so users know exactly how much time they have.
+Robust State Checking: The lookForNewState function is now much smarter. After you vote, it will patiently check every 5 seconds until the backend has finished its work and created a new poll with a different ID. This completely eliminates the looping bug.
+Final Instructions (This is it!)
+Clear the Database: Run DELETE FROM votes; DELETE FROM polls; DELETE FROM beats; one last time in Supabase.
+Apply Code Changes:
+Update the closes_at values in server.ts and server/sched/closePoll.ts.
+Replace the entire <script> in public/index.html.
+Deploy: Commit and push.
+Your system will now work as intended, with clear timers and a smooth, logical progression from one story beat to the next.
 </file>
 
 <file path="src/components/Poll.tsx">
@@ -2857,6 +2760,111 @@ Last Updated: [Current Date]
 Maintainer: [Your Name]
 </file>
 
+<file path="server/routes/chapters.ts">
+import express from "express";
+import { createClient } from "@supabase/supabase-js";
+import { ChapterAgent } from "../../src/agents/chapterAgent";
+const log = require("pino")();
+
+const router = express.Router();
+
+// Initialize Supabase client
+const supabase = createClient(
+  process.env.SUPABASE_URL!,
+  process.env.SUPABASE_ANON_KEY!
+);
+
+// This is our hardcoded first chapter, which acts as the genesis block.
+const GENESIS_CHAPTER = {
+  title: "Chapter 1: The Quest Begins",
+  body: "In the age of myth, where legends were forged in the crucible of destiny, two brothers, known only by their gleaming crowns of flesh, stood at a crossroads. The world, vast and unknowing, awaited their first, fateful decision."
+};
+
+router.post("/worlds/:id/arcs/:arcId/progress", async (req, res) => {
+  try {
+    log.info("Starting chapter generation for arc %s", req.params.arcId);
+
+    // Fetch context for the agent
+    const { data: previousChapters } = await supabase
+      .from("beats")
+      .select("body")
+      .order("authored_at", { ascending: false })
+      .limit(3);
+
+    const { data: lastPollResult } = await supabase
+      .from("polls")
+      .select("question, options")
+      .order("closes_at", { ascending: false })
+      .limit(1);
+
+    const prompt = `
+      Continue the story based on the context.
+      Previous Chapters: ${JSON.stringify(previousChapters)}
+      Last Poll: ${JSON.stringify(lastPollResult)}
+      Generate the next chapter in the Bald Brothers saga.
+    `;
+    
+    const result = await ChapterAgent.run(prompt);
+    
+    if (!result.success || !result.output || (result.output as string).length < 20) {
+      log.error("Chapter generation failed: %o", result);
+      return res.status(500).json({ error: "Chapter generation failed" });
+    }
+
+    const output = result.output as string;
+    log.info("Chapter generated %d chars", output.length);
+    
+    const { data, error } = await supabase.from("beats").insert({
+      arc_id: req.params.arcId,
+      body: output,
+      authored_at: new Date()
+    }).select().single();
+
+    if (error) {
+      log.error(error, "Failed to save chapter to Supabase");
+      return res.status(500).json({ error: "Failed to save chapter" });
+    }
+
+    log.info("Chapter successfully saved to database with ID %s", data.id);
+    res.json({ ok: true, body: output, id: data.id });
+  } catch (error) {
+    log.error(error, "Error in chapter generation endpoint");
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// Add endpoint to get the latest chapter
+router.get("/beats/latest", async (req, res) => {
+  try {
+    const { data: chapters, error } = await supabase
+      .from("beats")
+      .select("id, body")
+      .order("authored_at", { ascending: false })
+      .limit(1);
+
+    if (error) {
+      log.error(error, "Failed to fetch latest chapter, serving genesis.");
+      return res.json(GENESIS_CHAPTER);
+    }
+    
+    if (!chapters || chapters.length === 0) {
+      log.info("No chapters found in DB, serving genesis chapter.");
+      return res.json(GENESIS_CHAPTER);
+    }
+    
+    const { count } = await supabase.from("beats").select('*', { count: 'exact', head: true });
+    const chapterNumber = (count ?? 0) + 1;
+    
+    res.json({ title: `Chapter ${chapterNumber}: The Saga Continues`, body: chapters[0].body });
+  } catch (err) {
+    log.error(err, "Error fetching latest chapter");
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+export default router;
+</file>
+
 <file path="package.json">
 {
   "name": "bald_brothers",
@@ -2989,30 +2997,40 @@ const log = winston.createLogger({
 // Ensure poll durations are at least 30s in dev/test
 const pollDuration = process.env.NODE_ENV === 'production' ? 24 * 60 * 60 * 1000 : 30 * 1000;
 
+const FIRST_POLL = {
+    question: "What path shall the brothers take first?",
+    options: ["Venture into the Whispering Woods", "Climb the Sun-Scorched Peaks"],
+    closes_at: new Date(Date.now() + 120000) // 2 minutes
+};
+
 // Get the currently open poll
 router.get("/open", async (req, res) => {
   try {
-    // Check for existing open poll
-    const { data: polls, error: pollError } = await supabase
+    const { data: openPoll, error } = await supabase
       .from("polls")
       .select("*")
       .gt("closes_at", new Date().toISOString())
       .order("closes_at", { ascending: true })
-      .limit(1);
+      .limit(1)
+      .single();
 
-    if (pollError) {
-      log.error((pollError as Error).message || String(pollError), "Failed to fetch open polls");
-      return res.status(500).json({ error: "Internal server error" });
+    if (error || !openPoll) {
+        log.warn("No open poll found. Checking if any polls exist at all.");
+        const { count } = await supabase.from('polls').select('*', { count: 'exact', head: true });
+
+        if (count === 0) {
+            log.info("Database is empty. Creating and serving the first-ever poll.");
+            const { data: newPoll, error: insertError } = await supabase.from("polls").insert(FIRST_POLL).select().single();
+            if(insertError) throw insertError;
+            return res.json({ poll: newPoll });
+        }
+        
+        return res.json({ poll: null });
     }
 
-    // If no open poll exists, just return null (do not create any poll here)
-    if (!polls || polls.length === 0) {
-      return res.json({ poll: null });
-    }
-
-    res.json({ poll: polls[0] });
+    res.json({ poll: openPoll });
   } catch (error) {
-    log.error((error as Error).message || String(error), "Error in open poll endpoint");
+    log.error(error instanceof Error ? error.message : String(error), "Error in /polls/open endpoint");
     res.status(500).json({ error: "Internal server error" });
   }
 });
@@ -3022,76 +3040,19 @@ router.post("/:id/vote", async (req, res) => {
   try {
     const { choice } = req.body;
     const pollId = req.params.id;
-    
-    // Get or create client_id from cookie
     let clientId = req.cookies?.client_id;
     if (!clientId) {
       clientId = uuidv4();
-      res.cookie("client_id", clientId, { 
-        maxAge: 365 * 24 * 60 * 60 * 1000, // 1 year
-        httpOnly: true 
-      });
+      res.cookie("client_id", clientId, { maxAge: 365 * 24 * 60 * 60 * 1000, httpOnly: true });
     }
-
-    log.info("Processing vote for poll %s, client %s, choice %d", pollId, clientId, choice);
-
-    // Fetch poll to get options and check if open
-    const { data: poll, error: pollError } = await supabase
-      .from("polls")
-      .select("*")
-      .eq("id", pollId)
-      .single();
-
-    if (pollError || !poll) {
-      log.error((pollError as any)?.message || String(pollError), "Poll not found: %s", pollId);
-      return res.status(404).json({ error: "Poll not found" });
-    }
-
-    if (new Date(poll.closes_at) < new Date()) {
+    const { data: poll } = await supabase.from("polls").select("closes_at").eq("id", pollId).single();
+    if (!poll || new Date(poll.closes_at) < new Date()) {
       return res.status(400).json({ error: "Poll is closed" });
     }
-
-    // Validate choice is a valid option index
-    if (!Array.isArray(poll.options) || typeof choice !== 'number' || choice < 0 || choice >= poll.options.length) {
-      log.warn(`Invalid choice ${choice} for poll ${pollId}`);
-      return res.status(400).json({ error: `Invalid choice. Must be an integer between 0 and ${poll.options.length - 1}` });
-    }
-
-    // Insert or update vote (upsert)
-    const { data, error } = await supabase
-      .from("votes")
-      .upsert({
-        poll_id: pollId,
-        client_id: clientId,
-        choice: choice
-      }, {
-        onConflict: "poll_id,client_id"
-      });
-
-    if (error) {
-      if (error.message.includes("duplicate")) {
-        log.warn("Poll duplicate client_id %s", clientId);
-        // Try to update existing vote
-        const { error: updateError } = await supabase
-          .from("votes")
-          .update({ choice })
-          .eq("poll_id", pollId)
-          .eq("client_id", clientId);
-        
-        if (updateError) {
-          log.error((updateError as any)?.message || String(updateError), "Failed to update vote");
-          return res.status(500).json({ error: "Failed to record vote" });
-        }
-      } else {
-        log.error((error as any)?.message || String(error), "Failed to record vote");
-        return res.status(500).json({ error: "Failed to record vote" });
-      }
-    }
-
-    log.info("Vote recorded successfully for client %s", clientId);
-    res.json({ success: true, clientId });
+    await supabase.from("votes").upsert({ poll_id: pollId, client_id: clientId, choice: choice }, { onConflict: "poll_id,client_id" });
+    res.json({ success: true });
   } catch (error) {
-    log.error((error as any)?.message || String(error), "Error recording vote");
+    log.error(error instanceof Error ? error.message : String(error), "Error recording vote");
     res.status(500).json({ error: "Internal server error" });
   }
 });
@@ -3413,7 +3374,6 @@ app.listen(PORT, async () => {
   log.info("Bald Brothers Story Engine server started on port %d", PORT);
   log.info("Environment: %s", process.env.NODE_ENV || "development");
   
-  // The scheduler is now solely responsible for initialization.
   startPollScheduler();
   
   const requiredEnvVars = ["SUPABASE_URL", "SUPABASE_ANON_KEY", "OPENROUTER_API_KEY"];
@@ -3569,10 +3529,7 @@ export default app;
     const chapterContent = document.getElementById('chapter-content');
     const currentPollDiv = document.getElementById('current-poll');
 
-    let isWaitingForNextState = false;
-
-    // --- State Rendering Functions ---
-    function renderLoadingState(section) {
+    function renderLoading(section) {
         if (section === 'story') {
             storyHeading.textContent = 'Loading The Saga...';
             chapterContent.innerHTML = '<p>The chronicles of the Bald Brotherhood are being transcribed...</p>';
@@ -3582,118 +3539,61 @@ export default app;
     }
 
     function renderPoll(poll) {
-        if (isWaitingForNextState) return;
         let timeLeft = Math.round((new Date(poll.closes_at) - new Date()) / 1000);
-        
         currentPollDiv.innerHTML = `
             <h2>Current Poll</h2>
             <p><strong>${poll.question}</strong></p>
             <div class="poll-options">
-              ${poll.options.map((option, index) => `
-                <button onclick="vote(${index}, '${poll.id}')">${option}</button>
-              `).join('')}
+              ${poll.options.map((option, index) => `<button onclick="vote(${index}, '${poll.id}')">${option}</button>`).join('')}
             </div>
             <p><small>A new path will be chosen in <span id="poll-countdown">${timeLeft > 0 ? timeLeft : 0}</span>s...</small></p>
         `;
 
         const countdownSpan = document.getElementById('poll-countdown');
-        if (!countdownSpan) return;
         const pollTimer = setInterval(() => {
-            if (document.body.contains(countdownSpan)) {
-                timeLeft--;
-                countdownSpan.textContent = timeLeft > 0 ? timeLeft : 0;
-                if (timeLeft <= 0) clearInterval(pollTimer);
-            } else {
-                clearInterval(pollTimer);
-            }
+            if (!document.body.contains(countdownSpan)) { clearInterval(pollTimer); return; }
+            timeLeft--;
+            countdownSpan.textContent = timeLeft > 0 ? timeLeft : 0;
+            if (timeLeft <= 0) clearInterval(pollTimer);
         }, 1000);
     }
 
-    function renderVotedState() {
-        isWaitingForNextState = true;
-        currentPollDiv.innerHTML = `
-            <h2>Thank you for voting!</h2>
-            <p>The Bald Brothers' destiny is being forged...</p>
-            <p>A new chapter is being written. Please wait...</p>
-        `;
-    }
-    
-    // --- Core Logic ---
     async function fetchLatestChapter() {
-        try {
-            const response = await fetch(`/api/beats/latest?t=${new Date().getTime()}`);
-            const data = await response.json();
-            if (response.ok) {
-                storyHeading.textContent = data.title || "A New Chapter Unfolds";
-                chapterContent.innerHTML = `<p>${data.body.replace(/\n/g, '<br>')}</p>`;
-            } else {
-                storyHeading.textContent = 'The Story Begins...';
-                chapterContent.innerHTML = `<p>${data.body || "The chronicles are about to be written..."}</p>`;
-            }
-        } catch (error) {
-            console.error('Error fetching chapter:', error);
-        }
+        const response = await fetch(`/api/beats/latest?t=${new Date().getTime()}`);
+        const data = await response.json();
+        storyHeading.textContent = data.title;
+        chapterContent.innerHTML = `<p>${data.body.replace(/\n/g, '<br>')}</p>`;
     }
 
     async function fetchOpenPoll() {
-        if (isWaitingForNextState) return;
-        try {
-            const response = await fetch(`/polls/open?t=${new Date().getTime()}`);
-            if (!response.ok) throw new Error('Poll fetch failed');
-            const data = await response.json();
-            
-            if (data.poll) {
-                renderPoll(data.poll);
-            } else {
-                renderLoadingState('poll');
-                setTimeout(fetchOpenPoll, 5000); 
-            }
-        } catch (error) {
-            console.error('Error loading poll:', error);
+        const response = await fetch(`/polls/open?t=${new Date().getTime()}`);
+        const data = await response.json();
+        if (data.poll) {
+            renderPoll(data.poll);
+        } else {
+            renderLoading('poll');
+            setTimeout(fetchOpenPoll, 7000);
         }
     }
 
     async function vote(choiceIndex, pollId) {
-        if (isWaitingForNextState) return;
-        renderVotedState();
-
+        currentPollDiv.innerHTML = `<h2>Thank you for voting!</h2><p>The page will update with the new chapter shortly.</p>`;
         try {
             await fetch(`/polls/${pollId}/vote`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ choice: choiceIndex })
             });
-            lookForNewState(pollId);
-        } catch (error) {
-            console.error('Error submitting vote:', error);
-            alert('Failed to submit vote. Please try again.');
-            initialize();
+            setTimeout(() => { location.reload(true); }, 125000); // Wait 2 minutes 5 seconds
+        } catch (e) {
+            alert("Vote failed. Please try again.");
+            location.reload();
         }
     }
-    
-    function lookForNewState(votedPollId) {
-        console.log(`Waiting for a new poll (that is not ${votedPollId})`);
-        const interval = setInterval(async () => {
-            try {
-                const response = await fetch(`/polls/open?t=${new Date().getTime()}`);
-                const data = await response.json();
-                if (data.poll && data.poll.id !== votedPollId) {
-                    console.log(`New state found! Poll ID: ${data.poll.id}`);
-                    clearInterval(interval);
-                    initialize(); 
-                } else {
-                    console.log("Still waiting for new poll...");
-                }
-            } catch(e) {
-                console.error("Error while looking for new state:", e);
-            }
-        }, 5000);
-    }
 
-    // --- Initial Load ---
     function initialize() {
-        console.log("Re-initializing UI state...");
-        isWaitingForNextState = false;
+        renderLoading('story');
+        renderLoading('poll');
         fetchLatestChapter();
         fetchOpenPoll();
     }
@@ -3717,61 +3617,29 @@ const supabase = createClient(
 
 let isProcessingPollClosure = false;
 
-// This function now ONLY creates a poll. It does not call the AI.
-async function createNextPoll() {
-  log.info("[Scheduler] Creating the next poll...");
-  const { data: latestChapter } = await supabase
-    .from("beats")
-    .select("body")
-    .order("authored_at", { ascending: false })
-    .limit(1)
-    .single();
-
-  if (!latestChapter) {
-    log.error("[Scheduler] CRITICAL: No chapter found to base the next poll on. Aborting poll creation.");
-    return;
-  }
-  
-  // Simple, deterministic poll generation.
-  // We will assume the AI chapter ends with two choices on separate lines.
-  const chapterLines = latestChapter.body.split('\n').filter((line: string) => line.trim() !== '');
-  let choices = [
-      "The brothers take a moment to reflect on their journey.",
-      "An unexpected event throws their plans into chaos."
-  ]; // Fallback choices
-  
-  if (chapterLines.length >= 2) {
-      choices = [chapterLines[chapterLines.length - 2], chapterLines[chapterLines.length - 1]];
-  }
-  
-  const question = "What happens next?";
-
-  const { data: newPoll } = await supabase
-    .from("polls")
-    .insert({
-        question,
-        options: choices,
-        closes_at: new Date(Date.now() + 120000) // 2 minutes for robust testing
-    })
-    .select("id")
-    .single();
+async function createNextPoll(newChapterBody: string) {
+    log.info("[Scheduler] Creating the next poll based on new chapter...");
+    const chapterLines = newChapterBody.split('\n').filter(line => line.trim() !== '');
+    let choices = ["The adventure continues...", "But danger lurks nearby."]; 
+    if (chapterLines.length >= 2) {
+        choices = [chapterLines[chapterLines.length - 2], chapterLines[chapterLines.length - 1]];
+    }
     
-  if (newPoll) {
-    log.info(`[Scheduler] New poll created with ID ${newPoll.id}`);
-  } else {
-    log.error("[Scheduler] Failed to insert new poll into database.");
-  }
+    await supabase.from("polls").insert({
+        question: "What happens next?",
+        options: choices,
+        closes_at: new Date(Date.now() + 120000) // 2 minutes for testing
+    });
+    log.info("[Scheduler] Next poll has been created.");
 }
 
-// Main scheduler logic
 export async function closePollAndTally() {
   if (isProcessingPollClosure) {
     log.warn("[Scheduler] Cycle already running. Skipping.");
     return;
   }
   isProcessingPollClosure = true;
-  log.info("--------------------");
-  log.info("[Scheduler] Starting new cycle...");
+  log.info("--- [Scheduler] Starting Cycle ---");
 
   try {
     const { data: pollToProcess, error } = await supabase
@@ -3784,42 +3652,31 @@ export async function closePollAndTally() {
         .single();
 
     if (error || !pollToProcess) {
-        // THIS IS THE BOOTSTRAP LOGIC FOR A FRESH START
-        const { count } = await supabase.from('polls').select('*', { count: 'exact', head: true });
-        if (count === 0) {
-            log.warn("[Scheduler] System appears to be empty. Creating genesis chapter and first poll.");
-            const genesisBody = "In the age of myth, where legends were forged... two brothers stood at a crossroads.\n\nOption 1: They venture into the Whispering Woods.\nOption 2: They climb the Sun-Scorched Peaks.";
-            await supabase.from("beats").insert({ arc_id: "1", body: genesisBody });
-            await createNextPoll();
-        } else {
-            log.info("[Scheduler] No closed polls to process. Waiting for an open poll to finish.");
-        }
+        log.info("[Scheduler] No closed polls to process. Ending cycle.");
     } else {
-        // This is the normal loop for a running system
         log.info(`[Scheduler] Processing poll ID ${pollToProcess.id}`);
         await supabase.from('polls').update({ processed_at: new Date().toISOString() }).eq('id', pollToProcess.id);
         
         const { data: votes } = await supabase.from("votes").select("choice").eq("poll_id", pollToProcess.id);
-        const voteCounts = (pollToProcess.options as string[]).map((option, index) => ({ option, count: votes?.filter((v: any) => v.choice === index).length || 0 }));
+        const voteCounts = (pollToProcess.options as string[]).map((option, index) => ({ option, count: votes?.filter(v => v.choice === index).length || 0 }));
         const winner = voteCounts.reduce((a, b) => (b.count >= a.count ? b : a));
         log.info(`[Scheduler] Poll winner is "${winner.option}"`);
 
         const { data: latestChapter } = await supabase.from("beats").select("body").order("authored_at", { ascending: false }).limit(1).single();
-        const prompt = `The story so far:\n"${latestChapter?.body}"\n\nThe community voted for this to happen next: "${winner.option}".\n\nWrite the next part of the story, making sure to end it with two new, distinct choices for the next poll, each on its own line.`;
+        const prompt = `The story so far:\n"${latestChapter?.body}"\n\nThe community voted for this to happen next: "${winner.option}".\n\nWrite the next chapter of the story, making sure it ends with two new, distinct choices for the next poll, each on its own line.`;
         
         const result = await ChapterAgent.run(prompt);
         const newChapterBody = (result.success && result.output) ? result.output as string : 'The story is lost in the mists of time...';
         await supabase.from("beats").insert({ arc_id: "1", body: newChapterBody });
         log.info("[Scheduler] New chapter saved.");
 
-        await createNextPoll();
+        await createNextPoll(newChapterBody);
     }
   } catch (e) {
-    if(e instanceof Error) log.error(e, "[Scheduler] Unhandled error in main cycle.");
+    if(e instanceof Error) log.error(e, "[Scheduler] Unhandled error.");
   } finally {
     isProcessingPollClosure = false;
-    log.info("[Scheduler] Cycle finished.");
-    log.info("--------------------");
+    log.info("--- [Scheduler] Cycle Finished ---");
   }
 }
 
