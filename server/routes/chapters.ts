@@ -11,6 +11,11 @@ const supabase = createClient(
   process.env.SUPABASE_ANON_KEY!
 );
 
+const GENESIS_CHAPTER = {
+  title: "Chapter 1: The Quest Begins",
+  body: "In the age of myth, where legends were forged in the crucible of destiny, two brothers, known only by their gleaming crowns of flesh, stood at a crossroads. The world, vast and unknowing, awaited their first, fateful decision. This is the beginning of the Bald Brothers' saga."
+};
+
 router.post("/worlds/:id/arcs/:arcId/progress", async (req, res) => {
   try {
     log.info("Starting chapter generation for arc %s", req.params.arcId);
@@ -74,15 +79,18 @@ router.get("/beats/latest", async (req, res) => {
       .limit(1);
 
     if (error) {
-      log.error(error, "Failed to fetch latest chapter");
-      return res.status(500).json({ error: "Failed to fetch latest chapter" });
+      log.error(error, "Failed to fetch latest chapter, serving genesis.");
+      return res.json(GENESIS_CHAPTER);
     }
     
     if (!chapters || chapters.length === 0) {
-      return res.status(404).json({ title: "No chapters yet", body: "The story has not begun." });
+      return res.json(GENESIS_CHAPTER);
     }
     
-    const chapterNumber = (await supabase.from("beats").select('*', { count: 'exact', head: true })).count ?? 1;
+    const { count } = await supabase.from("beats").select('*', { count: 'exact', head: true });
+    
+    // Add 1 to the count to account for the un-stored genesis chapter
+    const chapterNumber = (count ?? 0) + 1;
     
     res.json({ title: `Chapter ${chapterNumber}: The Saga Continues`, body: chapters[0].body });
   } catch (err) {

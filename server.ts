@@ -49,7 +49,6 @@ app.listen(PORT, async () => {
   log.info("Bald Brothers Story Engine server started on port %d", PORT);
   log.info("Environment: %s", process.env.NODE_ENV || "development");
   
-  // The scheduler is now solely responsible for initialization.
   startPollScheduler();
   
   const requiredEnvVars = ["SUPABASE_URL", "SUPABASE_ANON_KEY", "OPENROUTER_API_KEY"];

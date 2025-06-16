@@ -31,30 +31,40 @@ const log = winston.createLogger({
 // Ensure poll durations are at least 30s in dev/test
 const pollDuration = process.env.NODE_ENV === 'production' ? 24 * 60 * 60 * 1000 : 30 * 1000;
 
+const FIRST_POLL = {
+    question: "What path shall the brothers take first?",
+    options: ["Venture into the Whispering Woods", "Climb the Sun-Scorched Peaks"],
+    closes_at: new Date(Date.now() + 120000) // 2 minutes
+};
+
 // Get the currently open poll
 router.get("/open", async (req, res) => {
   try {
-    // Check for existing open poll
-    const { data: polls, error: pollError } = await supabase
+    const { data: openPoll, error } = await supabase
       .from("polls")
       .select("*")
       .gt("closes_at", new Date().toISOString())
       .order("closes_at", { ascending: true })
-      .limit(1);
+      .limit(1)
+      .single();
 
-    if (pollError) {
-      log.error((pollError as Error).message || String(pollError), "Failed to fetch open polls");
-      return res.status(500).json({ error: "Internal server error" });
+    if (error || !openPoll) {
+        log.warn("No open poll found. Checking if any polls exist at all.");
+        const { count } = await supabase.from('polls').select('*', { count: 'exact', head: true });
+
+        if (count === 0) {
+            log.info("Database is empty. Creating and serving the first-ever poll.");
+            const { data: newPoll, error: insertError } = await supabase.from("polls").insert(FIRST_POLL).select().single();
+            if(insertError) throw insertError;
+            return res.json({ poll: newPoll });
+        }
+        
+        return res.json({ poll: null });
     }
 
-    // If no open poll exists, just return null (do not create any poll here)
-    if (!polls || polls.length === 0) {
-      return res.json({ poll: null });
-    }
-
-    res.json({ poll: polls[0] });
+    res.json({ poll: openPoll });
   } catch (error) {
-    log.error((error as Error).message || String(error), "Error in open poll endpoint");
+    log.error(error instanceof Error ? error.message : String(error), "Error in /polls/open endpoint");
     res.status(500).json({ error: "Internal server error" });
   }
 });
@@ -64,76 +74,19 @@ router.post("/:id/vote", async (req, res) => {
   try {
     const { choice } = req.body;
     const pollId = req.params.id;
-    
-    // Get or create client_id from cookie
     let clientId = req.cookies?.client_id;
     if (!clientId) {
       clientId = uuidv4();
-      res.cookie("client_id", clientId, { 
-        maxAge: 365 * 24 * 60 * 60 * 1000, // 1 year
-        httpOnly: true 
-      });
+      res.cookie("client_id", clientId, { maxAge: 365 * 24 * 60 * 60 * 1000, httpOnly: true });
     }
-
-    log.info("Processing vote for poll %s, client %s, choice %d", pollId, clientId, choice);
-
-    // Fetch poll to get options and check if open
-    const { data: poll, error: pollError } = await supabase
-      .from("polls")
-      .select("*")
-      .eq("id", pollId)
-      .single();
-
-    if (pollError || !poll) {
-      log.error((pollError as any)?.message || String(pollError), "Poll not found: %s", pollId);
-      return res.status(404).json({ error: "Poll not found" });
-    }
-
-    if (new Date(poll.closes_at) < new Date()) {
+    const { data: poll } = await supabase.from("polls").select("closes_at").eq("id", pollId).single();
+    if (!poll || new Date(poll.closes_at) < new Date()) {
       return res.status(400).json({ error: "Poll is closed" });
     }
-
-    // Validate choice is a valid option index
-    if (!Array.isArray(poll.options) || typeof choice !== 'number' || choice < 0 || choice >= poll.options.length) {
-      log.warn(`Invalid choice ${choice} for poll ${pollId}`);
-      return res.status(400).json({ error: `Invalid choice. Must be an integer between 0 and ${poll.options.length - 1}` });
-    }
-
-    // Insert or update vote (upsert)
-    const { data, error } = await supabase
-      .from("votes")
-      .upsert({
-        poll_id: pollId,
-        client_id: clientId,
-        choice: choice
-      }, {
-        onConflict: "poll_id,client_id"
-      });
-
-    if (error) {
-      if (error.message.includes("duplicate")) {
-        log.warn("Poll duplicate client_id %s", clientId);
-        // Try to update existing vote
-        const { error: updateError } = await supabase
-          .from("votes")
-          .update({ choice })
-          .eq("poll_id", pollId)
-          .eq("client_id", clientId);
-        
-        if (updateError) {
-          log.error((updateError as any)?.message || String(updateError), "Failed to update vote");
-          return res.status(500).json({ error: "Failed to record vote" });
-        }
-      } else {
-        log.error((error as any)?.message || String(error), "Failed to record vote");
-        return res.status(500).json({ error: "Failed to record vote" });
-      }
-    }
-
-    log.info("Vote recorded successfully for client %s", clientId);
-    res.json({ success: true, clientId });
+    await supabase.from("votes").upsert({ poll_id: pollId, client_id: clientId, choice: choice }, { onConflict: "poll_id,client_id" });
+    res.json({ success: true });
   } catch (error) {
-    log.error((error as any)?.message || String(error), "Error recording vote");
+    log.error(error instanceof Error ? error.message : String(error), "Error recording vote");
     res.status(500).json({ error: "Internal server error" });
   }
 });

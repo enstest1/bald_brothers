@@ -10,61 +10,29 @@ const supabase = createClient(
 
 let isProcessingPollClosure = false;
 
-// This function now ONLY creates a poll. It does not call the AI.
-async function createNextPoll() {
-  log.info("[Scheduler] Creating the next poll...");
-  const { data: latestChapter } = await supabase
-    .from("beats")
-    .select("body")
-    .order("authored_at", { ascending: false })
-    .limit(1)
-    .single();
-
-  if (!latestChapter) {
-    log.error("[Scheduler] CRITICAL: No chapter found to base the next poll on. Aborting poll creation.");
-    return;
-  }
-  
-  // Simple, deterministic poll generation.
-  // We will assume the AI chapter ends with two choices on separate lines.
-  const chapterLines = latestChapter.body.split('\n').filter((line: string) => line.trim() !== '');
-  let choices = [
-      "The brothers take a moment to reflect on their journey.",
-      "An unexpected event throws their plans into chaos."
-  ]; // Fallback choices
-  
-  if (chapterLines.length >= 2) {
-      choices = [chapterLines[chapterLines.length - 2], chapterLines[chapterLines.length - 1]];
-  }
-  
-  const question = "What happens next?";
-
-  const { data: newPoll } = await supabase
-    .from("polls")
-    .insert({
-        question,
-        options: choices,
-        closes_at: new Date(Date.now() + 120000) // 2 minutes for robust testing
-    })
-    .select("id")
-    .single();
+async function createNextPoll(newChapterBody: string) {
+    log.info("[Scheduler] Creating the next poll based on new chapter...");
+    const chapterLines = newChapterBody.split('\n').filter(line => line.trim() !== '');
+    let choices = ["The adventure continues...", "But danger lurks nearby."]; 
+    if (chapterLines.length >= 2) {
+        choices = [chapterLines[chapterLines.length - 2], chapterLines[chapterLines.length - 1]];
+    }
     
-  if (newPoll) {
-    log.info(`[Scheduler] New poll created with ID ${newPoll.id}`);
-  } else {
-    log.error("[Scheduler] Failed to insert new poll into database.");
-  }
+    await supabase.from("polls").insert({
+        question: "What happens next?",
+        options: choices,
+        closes_at: new Date(Date.now() + 120000) // 2 minutes for testing
+    });
+    log.info("[Scheduler] Next poll has been created.");
 }
 
-// Main scheduler logic
 export async function closePollAndTally() {
   if (isProcessingPollClosure) {
     log.warn("[Scheduler] Cycle already running. Skipping.");
     return;
   }
   isProcessingPollClosure = true;
-  log.info("--------------------");
-  log.info("[Scheduler] Starting new cycle...");
+  log.info("--- [Scheduler] Starting Cycle ---");
 
   try {
     const { data: pollToProcess, error } = await supabase
@@ -77,42 +45,31 @@ export async function closePollAndTally() {
         .single();
 
     if (error || !pollToProcess) {
-        // THIS IS THE BOOTSTRAP LOGIC FOR A FRESH START
-        const { count } = await supabase.from('polls').select('*', { count: 'exact', head: true });
-        if (count === 0) {
-            log.warn("[Scheduler] System appears to be empty. Creating genesis chapter and first poll.");
-            const genesisBody = "In the age of myth, where legends were forged... two brothers stood at a crossroads.\n\nOption 1: They venture into the Whispering Woods.\nOption 2: They climb the Sun-Scorched Peaks.";
-            await supabase.from("beats").insert({ arc_id: "1", body: genesisBody });
-            await createNextPoll();
-        } else {
-            log.info("[Scheduler] No closed polls to process. Waiting for an open poll to finish.");
-        }
+        log.info("[Scheduler] No closed polls to process. Ending cycle.");
     } else {
-        // This is the normal loop for a running system
         log.info(`[Scheduler] Processing poll ID ${pollToProcess.id}`);
         await supabase.from('polls').update({ processed_at: new Date().toISOString() }).eq('id', pollToProcess.id);
         
         const { data: votes } = await supabase.from("votes").select("choice").eq("poll_id", pollToProcess.id);
-        const voteCounts = (pollToProcess.options as string[]).map((option, index) => ({ option, count: votes?.filter((v: any) => v.choice === index).length || 0 }));
+        const voteCounts = (pollToProcess.options as string[]).map((option, index) => ({ option, count: votes?.filter(v => v.choice === index).length || 0 }));
         const winner = voteCounts.reduce((a, b) => (b.count >= a.count ? b : a));
         log.info(`[Scheduler] Poll winner is "${winner.option}"`);
 
         const { data: latestChapter } = await supabase.from("beats").select("body").order("authored_at", { ascending: false }).limit(1).single();
-        const prompt = `The story so far:\n"${latestChapter?.body}"\n\nThe community voted for this to happen next: "${winner.option}".\n\nWrite the next part of the story, making sure to end it with two new, distinct choices for the next poll, each on its own line.`;
+        const prompt = `The story so far:\n"${latestChapter?.body}"\n\nThe community voted for this to happen next: "${winner.option}".\n\nWrite the next chapter of the story, making sure it ends with two new, distinct choices for the next poll, each on its own line.`;
         
         const result = await ChapterAgent.run(prompt);
         const newChapterBody = (result.success && result.output) ? result.output as string : 'The story is lost in the mists of time...';
         await supabase.from("beats").insert({ arc_id: "1", body: newChapterBody });
         log.info("[Scheduler] New chapter saved.");
 
-        await createNextPoll();
+        await createNextPoll(newChapterBody);
     }
   } catch (e) {
-    if(e instanceof Error) log.error(e, "[Scheduler] Unhandled error in main cycle.");
+    if(e instanceof Error) log.error(e, "[Scheduler] Unhandled error.");
   } finally {
     isProcessingPollClosure = false;
-    log.info("[Scheduler] Cycle finished.");
-    log.info("--------------------");
+    log.info("--- [Scheduler] Cycle Finished ---");
   }
 }
 
