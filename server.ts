@@ -4,10 +4,40 @@ import "dotenv/config";
 import chaptersRouter from "./server/routes/chapters";
 import pollsRouter from "./server/routes/polls";
 import { startPollScheduler } from "./server/sched/closePoll";
+import { createClient } from "@supabase/supabase-js";
+import { GENESIS_CHAPTER_BODY, FIRST_POLL } from "./src/lib/constants";
 const log = require("pino")();
 
 const app = express();
 const PORT = process.env.PORT || 3000;
+
+// --- Database Bootstrap Logic ---
+const supabase = createClient(
+  process.env.SUPABASE_URL!,
+  process.env.SUPABASE_ANON_KEY!
+);
+
+async function bootstrapDatabase() {
+  log.info("[Bootstrap] Checking if database needs to be initialized...");
+  
+  const { count: chapterCount } = await supabase.from('beats').select('*', { count: 'exact', head: true });
+  if (chapterCount === 0) {
+    log.info("[Bootstrap] No chapters found. Inserting genesis chapter.");
+    await supabase.from('beats').insert({
+      arc_id: '1',
+      body: GENESIS_CHAPTER_BODY,
+      authored_at: new Date(0)
+    });
+  }
+
+  const { count: pollCount } = await supabase.from('polls').select('*', { count: 'exact', head: true });
+  if (pollCount === 0) {
+    log.info("[Bootstrap] No polls found. Inserting first poll.");
+    await supabase.from("polls").insert(FIRST_POLL);
+  }
+  log.info("[Bootstrap] Database check complete.");
+}
+// --- End of Bootstrap Logic ---
 
 // Middleware
 app.use(express.json());
@@ -49,6 +79,7 @@ app.listen(PORT, async () => {
   log.info("Bald Brothers Story Engine server started on port %d", PORT);
   log.info("Environment: %s", process.env.NODE_ENV || "development");
   
+  await bootstrapDatabase(); // Run the bootstrap logic on startup
   startPollScheduler();
   
   const requiredEnvVars = ["SUPABASE_URL", "SUPABASE_ANON_KEY", "OPENROUTER_API_KEY"];

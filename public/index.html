@@ -137,71 +137,114 @@
     const chapterContent = document.getElementById('chapter-content');
     const currentPollDiv = document.getElementById('current-poll');
 
-    function renderLoading(section) {
+    let isWaitingForNextState = false;
+
+    function renderLoadingState(section) {
         if (section === 'story') {
             storyHeading.textContent = 'Loading The Saga...';
             chapterContent.innerHTML = '<p>The chronicles of the Bald Brotherhood are being transcribed...</p>';
-        } else {
+        } else if (section === 'poll') {
             currentPollDiv.innerHTML = '<h2>Searching for the next path...</h2><p><small>The fates are aligning.</small></p>';
         }
     }
 
     function renderPoll(poll) {
+        if (isWaitingForNextState) return;
         let timeLeft = Math.round((new Date(poll.closes_at) - new Date()) / 1000);
+        
         currentPollDiv.innerHTML = `
             <h2>Current Poll</h2>
             <p><strong>${poll.question}</strong></p>
             <div class="poll-options">
-              ${poll.options.map((option, index) => `<button onclick="vote(${index}, '${poll.id}')">${option}</button>`).join('')}
+              ${poll.options.map((option, index) => `
+                <button onclick="vote(${index}, '${poll.id}')">${option}</button>
+              `).join('')}
             </div>
             <p><small>A new path will be chosen in <span id="poll-countdown">${timeLeft > 0 ? timeLeft : 0}</span>s...</small></p>
         `;
 
         const countdownSpan = document.getElementById('poll-countdown');
         const pollTimer = setInterval(() => {
-            if (!document.body.contains(countdownSpan)) { clearInterval(pollTimer); return; }
-            timeLeft--;
-            countdownSpan.textContent = timeLeft > 0 ? timeLeft : 0;
-            if (timeLeft <= 0) clearInterval(pollTimer);
+            if (countdownSpan && document.body.contains(countdownSpan)) {
+                timeLeft--;
+                countdownSpan.textContent = timeLeft > 0 ? timeLeft : 0;
+                if (timeLeft <= 0) clearInterval(pollTimer);
+            } else {
+                clearInterval(pollTimer);
+            }
         }, 1000);
     }
 
     async function fetchLatestChapter() {
-        const response = await fetch(`/api/beats/latest?t=${new Date().getTime()}`);
-        const data = await response.json();
-        storyHeading.textContent = data.title;
-        chapterContent.innerHTML = `<p>${data.body.replace(/\n/g, '<br>')}</p>`;
+        try {
+            const response = await fetch(`/api/beats/latest?t=${Date.now()}`);
+            if (!response.ok) throw new Error('Failed to fetch chapter');
+            const data = await response.json();
+            storyHeading.textContent = data.title;
+            chapterContent.innerHTML = `<p>${(data.body || "The story awaits...").replace(/\n/g, '<br>')}</p>`;
+        } catch (error) {
+            console.error('Error fetching chapter:', error);
+            storyHeading.textContent = 'Error Loading Story';
+            chapterContent.innerHTML = '<p>Could not load the latest chapter.</p>';
+        }
     }
 
     async function fetchOpenPoll() {
-        const response = await fetch(`/polls/open?t=${new Date().getTime()}`);
-        const data = await response.json();
-        if (data.poll) {
-            renderPoll(data.poll);
-        } else {
-            renderLoading('poll');
-            setTimeout(fetchOpenPoll, 7000);
+        if (isWaitingForNextState) return;
+        try {
+            const response = await fetch(`/polls/open?t=${Date.now()}`);
+            if (!response.ok) throw new Error('Poll fetch failed');
+            const data = await response.json();
+            
+            if (data.poll) {
+                renderPoll(data.poll);
+            } else {
+                renderLoadingState('poll');
+                setTimeout(fetchOpenPoll, 5000); // No poll found, check again in 5s.
+            }
+        } catch (error) {
+            console.error('Error loading poll:', error);
+            currentPollDiv.innerHTML = '<h2>Error loading poll.</h2>';
         }
     }
 
     async function vote(choiceIndex, pollId) {
-        currentPollDiv.innerHTML = `<h2>Thank you for voting!</h2><p>The page will update with the new chapter shortly.</p>`;
-        try {
-            await fetch(`/polls/${pollId}/vote`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ choice: choiceIndex })
-            });
-            setTimeout(() => { location.reload(true); }, 125000); // Wait 2 minutes 5 seconds
-        } catch (e) {
-            alert("Vote failed. Please try again.");
-            location.reload();
-        }
+        if (isWaitingForNextState) return;
+        isWaitingForNextState = true;
+        currentPollDiv.innerHTML = `<h2>Thank you for voting!</h2><p>The Bald Brothers' destiny is being forged... Please wait.</p>`;
+
+        fetch(`/polls/${pollId}/vote`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ choice: choiceIndex })
+        });
+        
+        lookForNewState(pollId);
+    }
+    
+    function lookForNewState(votedPollId) {
+        console.log(`Waiting for a new poll that is not ${votedPollId}`);
+        const interval = setInterval(async () => {
+            try {
+                const response = await fetch(`/polls/open?t=${Date.now()}`);
+                const data = await response.json();
+                
+                if (data.poll && data.poll.id !== votedPollId) {
+                    console.log(`New state found! New poll ID: ${data.poll.id}`);
+                    clearInterval(interval);
+                    isWaitingForNextState = false;
+                    initialize(); // Cycle is complete, refresh the page state.
+                }
+            } catch(e) {
+                console.error("Error while looking for new state:", e);
+            }
+        }, 5000); // Check every 5 seconds.
     }
 
     function initialize() {
-        renderLoading('story');
-        renderLoading('poll');
+        console.log("Initializing UI state...");
+        renderLoadingState('story');
+        renderLoadingState('poll');
         fetchLatestChapter();
         fetchOpenPoll();
     }

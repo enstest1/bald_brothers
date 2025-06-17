@@ -37,7 +37,7 @@ const FIRST_POLL = {
     closes_at: new Date(Date.now() + 120000) // 2 minutes
 };
 
-// Get the currently open poll
+// Get the currently open poll (SIMPLIFIED)
 router.get("/open", async (req, res) => {
   try {
     const { data: openPoll, error } = await supabase
@@ -48,21 +48,13 @@ router.get("/open", async (req, res) => {
       .limit(1)
       .single();
 
-    if (error || !openPoll) {
-        log.warn("No open poll found. Checking if any polls exist at all.");
-        const { count } = await supabase.from('polls').select('*', { count: 'exact', head: true });
-
-        if (count === 0) {
-            log.info("Database is empty. Creating and serving the first-ever poll.");
-            const { data: newPoll, error: insertError } = await supabase.from("polls").insert(FIRST_POLL).select().single();
-            if(insertError) throw insertError;
-            return res.json({ poll: newPoll });
-        }
-        
-        return res.json({ poll: null });
+    // It's normal for no poll to be found (e.g., between cycles).
+    // The .single() method throws an error in this case, which we can ignore.
+    if (error && error.code !== 'PGRST116') {
+        throw error;
     }
 
-    res.json({ poll: openPoll });
+    res.json({ poll: openPoll || null });
   } catch (error) {
     log.error(error instanceof Error ? error.message : String(error), "Error in /polls/open endpoint");
     res.status(500).json({ error: "Internal server error" });
