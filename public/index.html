@@ -185,7 +185,7 @@
         } catch (error) {
             console.error('Error fetching chapter:', error);
             storyHeading.textContent = 'Error Loading Story';
-            chapterContent.innerHTML = '<p>Could not load the latest chapter.</p>';
+            chapterContent.innerHTML = '<p>Could not load the latest chapter. The server may be waking up. Please refresh in a moment.</p>';
         }
     }
 
@@ -204,7 +204,8 @@
             }
         } catch (error) {
             console.error('Error loading poll:', error);
-            currentPollDiv.innerHTML = '<h2>Error loading poll.</h2>';
+            currentPollDiv.innerHTML = '<h2>Error loading poll. Retrying...</h2>';
+            setTimeout(fetchOpenPoll, 5000);
         }
     }
 
@@ -234,6 +235,8 @@
                     clearInterval(interval);
                     isWaitingForNextState = false;
                     initialize(); // Cycle is complete, refresh the page state.
+                } else {
+                  console.log("Still waiting for new poll...");
                 }
             } catch(e) {
                 console.error("Error while looking for new state:", e);

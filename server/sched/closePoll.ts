@@ -8,7 +8,6 @@ const supabase = createClient(
   process.env.SUPABASE_ANON_KEY!
 );
 
-// Define the hardcoded genesis chapter body here so the scheduler knows the story's true beginning.
 const GENESIS_CHAPTER_BODY = "In the age of myth, where legends were forged in the crucible of destiny, two brothers, known only by their gleaming crowns of flesh, stood at a crossroads. The world, vast and unknowing, awaited their first, fateful decision.";
 
 let isProcessingPollClosure = false;
@@ -16,17 +15,15 @@ let isProcessingPollClosure = false;
 async function createNextPoll(newChapterBody: string) {
     log.info("[Scheduler] Creating the next poll based on new chapter...");
     const chapterLines = newChapterBody.split('\n').filter(line => line.trim() !== '');
-    let choices = ["The adventure continues...", "But danger lurks nearby."]; 
-    if (chapterLines.length >= 2) {
-        choices = [chapterLines[chapterLines.length - 2], chapterLines[chapterLines.length - 1]];
-    }
+    // For hardcoded testing, we can use simple, predictable poll options.
+    let choices = ["Forge ahead into the unknown", "Pause to reflect on their baldness"]; 
     
     await supabase.from("polls").insert({
         question: "What happens next?",
         options: choices,
-        closes_at: new Date(Date.now() + 120000) // 2 minutes for testing
+        closes_at: new Date(Date.now() + 40000) // 40 seconds for testing
     });
-    log.info("[Scheduler] Next poll has been created.");
+    log.info("[Scheduler] Next poll has been created with options:", choices);
 }
 
 export async function closePollAndTally() {
@@ -43,7 +40,7 @@ export async function closePollAndTally() {
         .select('*')
         .lt('closes_at', new Date().toISOString())
         .is('processed_at', null)
-        .order('closes_at', { ascending: false })
+        .order('closes_at', { ascending: true })
         .limit(1)
         .single();
 
@@ -58,15 +55,12 @@ export async function closePollAndTally() {
         const winner = voteCounts.reduce((a, b) => (b.count >= a.count ? b : a));
         log.info(`[Scheduler] Poll winner is "${winner.option}"`);
 
-        const { data: latestChapter } = await supabase.from("beats").select("body").order("authored_at", { ascending: false }).limit(1).single();
-        
-        // If no chapter exists in the database, use the Genesis Chapter as context. Otherwise, use the latest one.
-        const storyContext = latestChapter?.body || GENESIS_CHAPTER_BODY;
+        // --- HARDCODED CHAPTER LOGIC ---
+        const hardcodedChapterBody = "Our Bald Brotherhood's fate awaits. This is Chapter One.";
+        const newChapterBody = hardcodedChapterBody;
+        log.info("[Scheduler] Using hardcoded chapter for testing.");
+        // --- END OF HARDCODED LOGIC ---
 
-        const prompt = `The story so far:\n"${storyContext}"\n\nThe community voted for this to happen next: "${winner.option}".\n\nWrite the next chapter of the story, making sure it ends with two new, distinct choices for the next poll, each on its own line.`;
-        
-        const result = await ChapterAgent.run(prompt);
-        const newChapterBody = (result.success && result.output) ? result.output as string : 'The story is lost in the mists of time...';
         await supabase.from("beats").insert({ arc_id: "1", body: newChapterBody });
         log.info("[Scheduler] New chapter saved.");
 
