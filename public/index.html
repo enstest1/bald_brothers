@@ -70,16 +70,19 @@
       color: #222;
       font-family: 'Press Start 2P', monospace;
       font-size: 1.1rem;
-      padding: 0.7em 2em;
+      padding: 0.7em 1.5em;
       border: none;
       border-radius: 6px;
       margin: 0.5em;
       cursor: pointer;
       box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
       transition: background 0.2s, transform 0.1s;
+      width: 100%;
     }
     .poll button:hover { background: #fff200; transform: translateY(-2px); }
     .poll button:disabled { background: #555; color: #888; cursor: not-allowed; }
+    .poll-options { max-width: 500px; margin: 1rem auto; }
+    .poll-option-container { margin-bottom: 1rem; }
     /* Story area */
     .story {
       background: rgba(19, 19, 19, 0.8);
@@ -95,6 +98,30 @@
     /* Footer */
     footer { text-align:center; font-size:.875rem; margin:3rem 0 1rem; color:#888; }
     a { color:#ffe600; }
+
+    /* --- NEW STYLES FOR VOTE COUNTERS AND BARS --- */
+    .vote-info {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        margin-top: 0.5rem;
+        font-family: 'Press Start 2P', monospace;
+        font-size: 0.8rem;
+        color: #ccc;
+    }
+    .progress-bar-container {
+        width: 100%;
+        background-color: #333;
+        border-radius: 4px;
+        height: 10px;
+        overflow: hidden;
+    }
+    .progress-bar {
+        height: 100%;
+        width: 0%; /* Default width */
+        background-color: #ffe600;
+        transition: width 0.5s ease-in-out;
+    }
   </style>
 </head>
 <body>
@@ -108,7 +135,7 @@
     <!-- Commandment section -->
     <section class="commandment">
       <h2>Bröther Commandment #1</h2>
-      <p><em>𝕿𝖍𝖔𝖚 𝖘𝖍𝖆𝖑𝖙 𝕽𝖊𝖘𝖕𝖊𝖈𝖙 𝖙𝖍𝖊 𝕭𝖆𝖑𝖉.</em><br><br>
+      <p><em>𝕿𝖍𝖔𝖚 𝖘𝖍𝖆𝖑𝖑 𝕽𝖊𝖘𝖕𝖊𝖈𝖙 𝖙𝖍𝖊 𝕭𝖆𝖑𝖉.</em><br><br>
          The bare crown is sacred. Let no wig, cap, or illusion defile it. From the bald head springs all truth.
       </p>
     </section>
@@ -140,42 +167,129 @@
     const pollResultsDiv = document.getElementById('poll-results');
 
     let isWaitingForNextState = false;
+    let activePollIntervals = []; // NEW: To keep track of our timers
 
-    function renderLoadingState(section) {
-        if (section === 'story') {
-            storyHeading.textContent = 'Loading The Saga...';
-            chapterContent.innerHTML = '<p>The chronicles of the Bald Brotherhood are being transcribed...</p>';
-            pollResultsDiv.innerHTML = '';
-        } else if (section === 'poll') {
-            currentPollDiv.innerHTML = '<h2>Searching for the next path...</h2><p><small>The fates are aligning.</small></p>';
+    // NEW: Function to clear all active timers
+    function clearActivePollTimers() {
+        activePollIntervals.forEach(clearInterval);
+        activePollIntervals = [];
+    }
+
+    // NEW: Function to format time for the countdown
+    function formatTime(seconds) {
+        if (seconds < 0) seconds = 0;
+        const d = Math.floor(seconds / (3600*24));
+        const h = Math.floor(seconds % (3600*24) / 3600);
+        const m = Math.floor(seconds % 3600 / 60);
+        const s = Math.floor(seconds % 60);
+        return `${d}d ${h}h ${m}m ${s}s`;
+    }
+
+    // NEW: Function to update live vote counts
+    async function updatePollResults(pollId) {
+        try {
+            const response = await fetch(`/polls/${pollId}/results`);
+            const data = await response.json();
+            if (!data.results) return;
+
+            const totalVotes = data.results.reduce((sum, r) => sum + r.count, 0);
+
+            data.results.forEach((result, index) => {
+                const voteCountEl = document.getElementById(`vote-count-${index}`);
+                const progressBarEl = document.getElementById(`progress-bar-${index}`);
+                
+                if (voteCountEl) voteCountEl.textContent = `${result.count} votes`;
+                if (progressBarEl) {
+                    const percentage = totalVotes > 0 ? (result.count / totalVotes) * 100 : 0;
+                    progressBarEl.style.width = `${percentage}%`;
+                }
+            });
+        } catch (error) {
+            console.error("Could not update poll results:", error);
         }
     }
 
     function renderPoll(poll) {
         if (isWaitingForNextState) return;
-        let timeLeft = Math.round((new Date(poll.closes_at) - new Date()) / 1000);
-        
+        clearActivePollTimers(); // Clear any old timers before rendering a new poll
+
         currentPollDiv.innerHTML = `
             <h2>Current Poll</h2>
             <p><strong>${poll.question}</strong></p>
             <div class="poll-options">
               ${poll.options.map((option, index) => `
-                <button onclick="vote(${index}, '${poll.id}')">${option}</button>
+                <div class="poll-option-container">
+                    <button onclick="vote(${index}, '${poll.id}')">${option}</button>
+                    <div class="vote-info">
+                        <div class="progress-bar-container">
+                            <div class="progress-bar" id="progress-bar-${index}"></div>
+                        </div>
+                        <span id="vote-count-${index}" style="margin-left: 10px; min-width: 60px; text-align: right;">0 votes</span>
+                    </div>
+                </div>
               `).join('')}
             </div>
-            <p><small>A new path will be chosen in <span id="poll-countdown">${timeLeft > 0 ? timeLeft : 0}</span>s...</small></p>
+            <p><small>A new path will be chosen in <span id="poll-countdown">--</span></small></p>
         `;
 
+        // Start countdown timer
         const countdownSpan = document.getElementById('poll-countdown');
-        const pollTimer = setInterval(() => {
+        let timeLeft = Math.round((new Date(poll.closes_at) - new Date()) / 1000);
+        
+        const countdownTimer = setInterval(() => {
             if (countdownSpan && document.body.contains(countdownSpan)) {
+                countdownSpan.textContent = formatTime(timeLeft);
                 timeLeft--;
-                countdownSpan.textContent = timeLeft > 0 ? timeLeft : 0;
-                if (timeLeft <= 0) clearInterval(pollTimer);
+                if (timeLeft < 0) clearInterval(countdownTimer);
             } else {
-                clearInterval(pollTimer);
+                clearInterval(countdownTimer);
             }
         }, 1000);
+
+        // Start live results updater
+        updatePollResults(poll.id); // Fetch results immediately
+        const resultsTimer = setInterval(() => updatePollResults(poll.id), 10000); // And every 10 seconds
+
+        activePollIntervals.push(countdownTimer, resultsTimer);
+    }
+
+    async function vote(choiceIndex, pollId) {
+        if (isWaitingForNextState) return;
+        isWaitingForNextState = true;
+        clearActivePollTimers(); // Stop timers immediately on vote
+
+        currentPollDiv.innerHTML = `<h2>Thank you for voting!</h2><p>The Bald Brothers' destiny is being forged... Please wait.</p>`;
+
+        fetch(`/polls/${pollId}/vote`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ choice: choiceIndex })
+        });
+        
+        lookForNewState(pollId);
+    }
+    
+    function lookForNewState(votedPollId) {
+        const interval = setInterval(async () => {
+            try {
+                const response = await fetch(`/polls/open?t=${Date.now()}`);
+                const data = await response.json();
+                
+                if (data.poll && data.poll.id !== votedPollId) {
+                    clearInterval(interval);
+                    isWaitingForNextState = false;
+
+                    const resultsResponse = await fetch(`/polls/${votedPollId}/results`);
+                    const resultsData = await resultsResponse.json();
+                    if(resultsData.results) {
+                        renderPollResults(resultsData.results);
+                    }
+                    
+                    fetchLatestChapter();
+                    fetchOpenPoll();
+                }
+            } catch(e) { console.error("Error while looking for new state:", e); }
+        }, 5000);
     }
 
     function renderPollResults(results) {
@@ -200,7 +314,7 @@
         } catch (error) {
             console.error('Error fetching chapter:', error);
             storyHeading.textContent = 'Error Loading Story';
-            chapterContent.innerHTML = '<p>Could not load the latest chapter. The server may be waking up. Please refresh in a moment.</p>';
+            chapterContent.innerHTML = '<p>Could not load the latest chapter. Please refresh in a moment.</p>';
         }
     }
 
@@ -214,63 +328,22 @@
             if (data.poll) {
                 renderPoll(data.poll);
             } else {
-                renderLoadingState('poll');
-                setTimeout(fetchOpenPoll, 5000); // No poll found, check again in 5s.
+                clearActivePollTimers();
+                currentPollDiv.innerHTML = '<h2>Searching for the next path...</h2>';
+                setTimeout(fetchOpenPoll, 5000);
             }
         } catch (error) {
             console.error('Error loading poll:', error);
+            clearActivePollTimers();
             currentPollDiv.innerHTML = '<h2>Error loading poll. Retrying...</h2>';
             setTimeout(fetchOpenPoll, 5000);
         }
     }
 
-    async function vote(choiceIndex, pollId) {
-        if (isWaitingForNextState) return;
-        isWaitingForNextState = true;
-        currentPollDiv.innerHTML = `<h2>Thank you for voting!</h2><p>The Bald Brothers' destiny is being forged... Please wait.</p>`;
-
-        fetch(`/polls/${pollId}/vote`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ choice: choiceIndex })
-        });
-        
-        lookForNewState(pollId);
-    }
-    
-    function lookForNewState(votedPollId) {
-        console.log(`Waiting for a new poll that is not ${votedPollId}`);
-        const interval = setInterval(async () => {
-            try {
-                const response = await fetch(`/polls/open?t=${Date.now()}`);
-                const data = await response.json();
-                
-                if (data.poll && data.poll.id !== votedPollId) {
-                    console.log(`New state found! New poll ID: ${data.poll.id}`);
-                    clearInterval(interval);
-                    isWaitingForNextState = false;
-
-                    const resultsResponse = await fetch(`/polls/${votedPollId}/results`);
-                    const resultsData = await resultsResponse.json();
-                    if(resultsData.results) {
-                        renderPollResults(resultsData.results);
-                    }
-
-                    fetchLatestChapter();
-                    fetchOpenPoll();
-                } else {
-                  console.log("Still waiting for new poll...");
-                }
-            } catch(e) {
-                console.error("Error while looking for new state:", e);
-            }
-        }, 5000);
-    }
-
     function initialize() {
-        console.log("Initializing UI state...");
-        renderLoadingState('story');
-        renderLoadingState('poll');
+        isWaitingForNextState = false;
+        clearActivePollTimers();
+        pollResultsDiv.innerHTML = '';
         fetchLatestChapter();
         fetchOpenPoll();
     }
