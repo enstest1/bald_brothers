@@ -235,29 +235,29 @@ router.get("/:id/results", async (req, res) => {
       .select("options")
       .eq("id", pollId)
       .single();
-
     if (pollError || !poll) {
+      log.error((pollError as any)?.message || String(pollError), "Poll not found: %s", pollId);
       return res.status(404).json({ error: "Poll not found" });
     }
+    const options = poll.options;
 
     const { data: votes, error: voteError } = await supabase
       .from("votes")
       .select("choice")
       .eq("poll_id", pollId);
-
     if (voteError) {
-      throw voteError;
+      log.error((voteError as any)?.message || String(voteError), "Failed to fetch votes for poll %s", pollId);
+      return res.status(500).json({ error: "Failed to fetch votes" });
     }
 
-    const results = poll.options.map((option: string, index: number) => ({
-      option,
-      count: votes.filter((v: { choice: number }) => v.choice === index).length,
-    }));
-    
-    log.info("Poll %s results: %o", pollId, results);
-    res.json({ results });
+    const counts = options.map((opt: string, idx: number) => ({
+      option: opt,
+      count: votes.filter((v: { choice: number }) => v.choice === idx).length
+    })); 
+    log.info("Poll %s results: %o", pollId, counts);
+    res.json({ results: counts });
   } catch (error) {
-    log.error(error, "Error fetching poll results");
+    log.error(`Error fetching poll results: ${error instanceof Error ? error.message : String(error)}`);
     res.status(500).json({ error: "Internal server error" });
   }
 });
