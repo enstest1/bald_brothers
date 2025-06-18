@@ -177,7 +177,7 @@
 
     async function fetchLatestChapter() {
         try {
-            const response = await fetch(`/api/beats/latest?t=${Date.now()}`);
+            const response = await fetch(`/beats/latest?t=${Date.now()}`);
             if (!response.ok) throw new Error('Failed to fetch chapter');
             const data = await response.json();
             storyHeading.textContent = data.title;

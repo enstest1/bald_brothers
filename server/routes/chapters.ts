@@ -3,7 +3,9 @@ import { createClient } from "@supabase/supabase-js";
 import { ChapterAgent } from "../../src/agents/chapterAgent";
 const log = require("pino")();
 
-const router = express.Router();
+// Create two separate routers
+const publicChaptersRouter = express.Router();
+const protectedChaptersRouter = express.Router();
 
 // Initialize Supabase client
 const supabase = createClient(
@@ -17,8 +19,8 @@ const GENESIS_CHAPTER = {
   body: "In the age of myth, where legends were forged in the crucible of destiny, two brothers, known only by their gleaming crowns of flesh, stood at a crossroads. The world, vast and unknowing, awaited their first, fateful decision."
 };
 
-// This endpoint is no longer used by the scheduler but is kept for potential future use or manual triggering.
-router.post("/worlds/:id/arcs/:arcId/progress", async (req, res) => {
+// This endpoint is for generating new chapters and should be protected.
+protectedChaptersRouter.post("/worlds/:id/arcs/:arcId/progress", async (req, res) => {
   try {
     log.info("Starting chapter generation for arc %s", req.params.arcId);
     
@@ -44,8 +46,8 @@ router.post("/worlds/:id/arcs/:arcId/progress", async (req, res) => {
   }
 });
 
-// Endpoint to get the latest chapter
-router.get("/beats/latest", async (req, res) => {
+// This endpoint gets the latest chapter and should be public.
+publicChaptersRouter.get("/latest", async (req, res) => {
   try {
     const { data: chapters, error } = await supabase
       .from("beats")
@@ -55,7 +57,6 @@ router.get("/beats/latest", async (req, res) => {
 
     if (error) {
       log.error(error, "Failed to fetch latest chapter, serving genesis.");
-      // Even on database error, serve the default chapter so the UI doesn't break
       return res.status(200).json(GENESIS_CHAPTER);
     }
     
@@ -65,14 +66,14 @@ router.get("/beats/latest", async (req, res) => {
     }
     
     const { count } = await supabase.from("beats").select('*', { count: 'exact', head: true });
-    const chapterNumber = (count ?? 0); // Genesis is chapter 1, next is chapter 2
+    const chapterNumber = (count ?? 0);
     
     res.json({ title: `Chapter ${chapterNumber}: The Saga Continues`, body: chapters[0].body });
   } catch (err) {
     log.error(err, "Unhandled error fetching latest chapter, serving genesis as fallback.");
-    // On any unexpected error, send the default chapter with a 200 OK status.
     res.status(200).json(GENESIS_CHAPTER);
   }
 });
 
-export default router;
+// Export both routers
+export { publicChaptersRouter, protectedChaptersRouter };

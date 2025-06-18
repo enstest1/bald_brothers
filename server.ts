@@ -1,7 +1,7 @@
 import express from "express";
 import cookieParser from "cookie-parser";
 import "dotenv/config";
-import chaptersRouter from "./server/routes/chapters";
+import { publicChaptersRouter, protectedChaptersRouter } from "./server/routes/chapters";
 import pollsRouter from "./server/routes/polls";
 import { startPollScheduler } from "./server/sched/closePoll";
 import { createClient } from "@supabase/supabase-js";
@@ -63,7 +63,8 @@ const authenticateAPI = (req: express.Request, res: express.Response, next: expr
 
 // Routes
 app.use("/api", authenticateAPI as express.RequestHandler);
-app.use("/api", chaptersRouter);
+app.use("/api", protectedChaptersRouter);
+app.use("/beats", publicChaptersRouter);
 app.use("/polls", pollsRouter);
 
 app.get("/health", (req, res) => res.json({ status: "ok" }));
