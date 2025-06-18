@@ -230,37 +230,34 @@ router.get("/:id/results", async (req, res) => {
     const pollId = req.params.id;
     log.info("Fetching results for poll %s", pollId);
 
-    // Fetch poll to get options
     const { data: poll, error: pollError } = await supabase
       .from("polls")
       .select("options")
       .eq("id", pollId)
       .single();
+
     if (pollError || !poll) {
-      log.error((pollError as any)?.message || String(pollError), "Poll not found: %s", pollId);
       return res.status(404).json({ error: "Poll not found" });
     }
-    const options = poll.options;
 
-    // Fetch all votes for this poll
     const { data: votes, error: voteError } = await supabase
       .from("votes")
       .select("choice")
       .eq("poll_id", pollId);
+
     if (voteError) {
-      log.error((voteError as any)?.message || String(voteError), "Failed to fetch votes for poll %s", pollId);
-      return res.status(500).json({ error: "Failed to fetch votes" });
+      throw voteError;
     }
 
-    // Count votes for each option
-    const counts = options.map((opt: string, idx: number) => ({
-      option: opt,
-      count: votes.filter((v: { choice: number }) => v.choice === idx).length
-    })); // Map each option to its vote count
-    log.info("Poll %s results: %o", pollId, counts);
-    res.json({ results: counts });
+    const results = poll.options.map((option: string, index: number) => ({
+      option,
+      count: votes.filter((v: { choice: number }) => v.choice === index).length,
+    }));
+    
+    log.info("Poll %s results: %o", pollId, results);
+    res.json({ results });
   } catch (error) {
-    log.error((error as any)?.message || String(error), "Error fetching poll results");
+    log.error(error, "Error fetching poll results");
     res.status(500).json({ error: "Internal server error" });
   }
 });

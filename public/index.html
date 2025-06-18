@@ -122,6 +122,7 @@
     <!-- Story area -->
     <section class="story" id="story-section">
       <h2 id="story-heading">Loading The Saga...</h2>
+      <div id="poll-results"></div>
       <div id="chapter-content">
         <p>The chronicles of the Bald Brotherhood are being transcribed...</p>
       </div>
@@ -136,6 +137,7 @@
     const storyHeading = document.getElementById('story-heading');
     const chapterContent = document.getElementById('chapter-content');
     const currentPollDiv = document.getElementById('current-poll');
+    const pollResultsDiv = document.getElementById('poll-results');
 
     let isWaitingForNextState = false;
 
@@ -143,6 +145,7 @@
         if (section === 'story') {
             storyHeading.textContent = 'Loading The Saga...';
             chapterContent.innerHTML = '<p>The chronicles of the Bald Brotherhood are being transcribed...</p>';
+            pollResultsDiv.innerHTML = '';
         } else if (section === 'poll') {
             currentPollDiv.innerHTML = '<h2>Searching for the next path...</h2><p><small>The fates are aligning.</small></p>';
         }
@@ -173,6 +176,18 @@
                 clearInterval(pollTimer);
             }
         }, 1000);
+    }
+
+    function renderPollResults(results) {
+        const totalVotes = results.reduce((sum, result) => sum + result.count, 0);
+        let resultsHTML = '<h3>Last Poll Results:</h3><ul>';
+        results.forEach(result => {
+            const percentage = totalVotes > 0 ? ((result.count / totalVotes) * 100).toFixed(0) : 0;
+            resultsHTML += `<li>${result.option}: ${result.count} votes (${percentage}%)</li>`;
+        });
+        resultsHTML += '</ul>';
+        pollResultsDiv.innerHTML = resultsHTML;
+        pollResultsDiv.style.marginBottom = '2rem';
     }
 
     async function fetchLatestChapter() {
@@ -234,14 +249,22 @@
                     console.log(`New state found! New poll ID: ${data.poll.id}`);
                     clearInterval(interval);
                     isWaitingForNextState = false;
-                    initialize(); // Cycle is complete, refresh the page state.
+
+                    const resultsResponse = await fetch(`/polls/${votedPollId}/results`);
+                    const resultsData = await resultsResponse.json();
+                    if(resultsData.results) {
+                        renderPollResults(resultsData.results);
+                    }
+
+                    fetchLatestChapter();
+                    fetchOpenPoll();
                 } else {
                   console.log("Still waiting for new poll...");
                 }
             } catch(e) {
                 console.error("Error while looking for new state:", e);
             }
-        }, 5000); // Check every 5 seconds.
+        }, 5000);
     }
 
     function initialize() {

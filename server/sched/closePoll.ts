@@ -19,7 +19,7 @@ async function createNextPoll(newChapterBody: string) {
     await supabase.from("polls").insert({
         question: "What happens next?",
         options: choices,
-        closes_at: new Date(Date.now() + 40000) // 40 seconds for testing
+        closes_at: new Date(Date.now() + 24 * 60 * 60 * 1000)
     });
     log.info("[Scheduler] Next poll has been created with options:", choices);
 }
@@ -91,9 +91,9 @@ export async function closePollAndTally() {
 }
 
 export function startPollScheduler() {
-  const cronIntervalSeconds = 35;
-  log.info(`[Scheduler] Initializing. Polling interval: ${cronIntervalSeconds} seconds.`);
-  cron.schedule(`*/${cronIntervalSeconds} * * * * *`, closePollAndTally);
+  const cronIntervalMinutes = 5;
+  log.info(`[Scheduler] Initializing. Polling interval: ${cronIntervalMinutes} minutes.`);
+  cron.schedule(`*/${cronIntervalMinutes} * * * *`, closePollAndTally);
   log.info("[Scheduler] Poll scheduler started.");
 }
 
